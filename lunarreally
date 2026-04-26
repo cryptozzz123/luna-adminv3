@@ -1,21 +1,20 @@
--- ═══════════════════════════════════════════════════════════════════════
---  🌸  LUNA ADMIN  V4
---  Sirius-Style Dark UI  ·  Executor Detection  ·  Friends Counter
---  Drawing ESP  ·  Fixed Fling  ·  NDS Tools  ·  Script Hubs
---  PC & Mobile Adaptive  ·  Re-execute Safe
--- ═══════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
+--  🌸  LUNA ADMIN  V5  "Aurora"
+--  Key System · Luna Premium · Script Expiry · Sirius UI
+--  Drawing ESP · Fling · NDS · Script Hubs · PC & Mobile
+-- ═══════════════════════════════════════════════════════════════════════════
 
--- ──────────────────────────── [1] CLEANUP ───────────────────────────────
+-- ─────────────────────────────── [1] CLEANUP ────────────────────────────────
 pcall(function()
-    for _, p in ipairs({game:GetService("CoreGui"),
-        game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")}) do
-        if p then for _, v in ipairs(p:GetChildren()) do
-            if v.Name=="LunaAdmin" or v.Name=="LunaLoading" then v:Destroy() end
+    for _,p in ipairs({game:GetService("CoreGui"),
+        (game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui"))}) do
+        if p then for _,v in ipairs(p:GetChildren()) do
+            if v.Name:find("LunaAdmin") or v.Name:find("LunaLoading") or v.Name:find("LunaKey") then v:Destroy() end
         end end
     end
 end)
 
--- ──────────────────────────── [2] SERVICES ──────────────────────────────
+-- ─────────────────────────────── [2] SERVICES ───────────────────────────────
 local Players  = game:GetService("Players")
 local RunSvc   = game:GetService("RunService")
 local UIS      = game:GetService("UserInputService")
@@ -26,141 +25,158 @@ local LP       = Players.LocalPlayer
 local Cam      = workspace.CurrentCamera
 if not LP.Character then LP.CharacterAdded:Wait() end
 
--- ──────────────────────────── [3] EXECUTOR DETECTION ────────────────────
-local EXEC_NAME = "Unknown"
+-- ─────────────────────────────── [3] EXPIRY (2 days) ───────────────────────
+-- Key rotates every 48 hours. INSTALL_TIME is os.time() at first run.
+-- We embed a compile-time anchor so re-runs within the 2-day window still work.
+local EPOCH_ANCHOR = 1745000000  -- approximate epoch reference (update on release)
+local PERIOD       = 60 * 60 * 48  -- 48 hours in seconds
+local PERIOD_INDEX = math.floor((os.time() - EPOCH_ANCHOR) / PERIOD)
+
+-- Script is considered "expired" if more than 2 periods have passed
+-- (i.e. the user must get a new key at most every 2 days)
+local SCRIPT_EXPIRED = false
+local EXPIRE_CHECK_PERIOD = 2  -- periods before hard-expire (user can re-key)
+
+-- ─────────────────────────────── [4] KEY SYSTEM ─────────────────────────────
+-- Valid key format: LUNA_XXXXXXXX  (8 uppercase alphanumeric chars)
+-- Key is deterministic: derived from period index + secret salt
+-- Changes every 48 hours automatically.
+
+local KEY_SALT    = "LunaAurora2025"
+local KEY_CHARSET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+local function GenerateKey(periodIdx)
+    -- Simple hash: combine salt + periodIdx chars
+    local seed = 0
+    local src   = KEY_SALT .. tostring(periodIdx)
+    for i = 1, #src do seed = (seed * 31 + src:byte(i)) % 2147483647 end
+    local result = "LUNA_"
+    for i = 1, 8 do
+        seed = (seed * 1664525 + 1013904223) % 2147483648
+        local idx = (seed % #KEY_CHARSET) + 1
+        result = result .. KEY_CHARSET:sub(idx, idx)
+    end
+    return result
+end
+
+local CURRENT_KEY  = GenerateKey(PERIOD_INDEX)
+local PREVIOUS_KEY = GenerateKey(PERIOD_INDEX - 1)  -- grace period: accept previous key too
+local PREMIUM_UNLOCKED = true   -- everyone gets premium access
+local PREMIUM_FEATURES = {}  -- callbacks registered by premium section
+
+local function ValidateKey(input)
+    if not input or #input < 5 then return false end
+    local clean = input:upper():gsub("%s", "")
+    -- Accept any key that starts with LUNA_
+    return clean:sub(1, 5) == "LUNA_"
+end
+
+-- ─────────────────────────────── [5] EXECUTOR DETECTION ────────────────────
+local EXEC_NAME = "Unknown Executor"
 pcall(function()
-    if getexecutorname   then EXEC_NAME = getexecutorname()
+    if getexecutorname    then EXEC_NAME = getexecutorname()
     elseif identifyexecutor then EXEC_NAME = identifyexecutor()
-    elseif KRNL_LOADED   then EXEC_NAME = "KRNL"
-    elseif syn           then EXEC_NAME = "Synapse X"
-    elseif fluxus        then EXEC_NAME = "Fluxus"
-    elseif Evon          then EXEC_NAME = "Evon"
-    elseif electron      then EXEC_NAME = "Electron"
-    elseif Delta         then EXEC_NAME = "Delta"
-    elseif oxygen        then EXEC_NAME = "Oxygen U"
+    elseif KRNL_LOADED    then EXEC_NAME = "KRNL"
+    elseif syn            then EXEC_NAME = "Synapse X"
+    elseif fluxus         then EXEC_NAME = "Fluxus"
+    elseif Evon           then EXEC_NAME = "Evon"
+    elseif electron       then EXEC_NAME = "Electron"
+    elseif Delta          then EXEC_NAME = "Delta"
+    elseif oxygen         then EXEC_NAME = "Oxygen U"
+    elseif KRNLUI         then EXEC_NAME = "KRNL"
     end
 end)
-
 local DrawOK = false; local DFont = 0
 pcall(function() local x=Drawing.new("Text"); x:Remove(); DrawOK=true end)
 pcall(function() DFont=Drawing.Fonts.UI end)
-if EXEC_NAME=="Unknown" and DrawOK then EXEC_NAME="Trusted Executor" end
+if EXEC_NAME=="Unknown Executor" and DrawOK then EXEC_NAME="Trusted Executor" end
 local EXEC_SUPPORTED = DrawOK
 
--- ──────────────────────────── [4] DEVICE & LAYOUT ───────────────────────
+-- ─────────────────────────────── [6] DEVICE LAYOUT ─────────────────────────
 local IS_MOBILE = UIS.TouchEnabled and not UIS.KeyboardEnabled
-local WIN_W  = IS_MOBILE and 390 or 730
-local WIN_H  = IS_MOBILE and 530 or 485
-local SB_W   = IS_MOBILE and 0   or 48    -- sidebar width (icon-only)
-local TOP_H  = 38
+local WIN_W  = IS_MOBILE and 390 or 740
+local WIN_H  = IS_MOBILE and 540 or 495
+local SB_W   = IS_MOBILE and 0   or 50
+local TOP_H  = 40
 
--- ──────────────────────────── [5] NDS CHECK ─────────────────────────────
+-- ─────────────────────────────── [7] NDS CHECK ──────────────────────────────
 local IS_NDS = false
-for _, id in ipairs({189707, 2724840788}) do if game.PlaceId==id then IS_NDS=true; break end end
+for _,id in ipairs({189707,2724840788}) do if game.PlaceId==id then IS_NDS=true; break end end
 
--- ──────────────────────────── [6] CLIPBOARD / LOADSTRING ────────────────
+-- ─────────────────────────────── [8] HELPERS ────────────────────────────────
 local function CopyClip(t)
     pcall(function() setclipboard(t) end)
     pcall(function() Clipboard.set(t) end)
     pcall(function() game:GetService("GuiService"):SetClipboard(t) end)
 end
 local function RunLS(url)
-    task.spawn(function()
-        pcall(function() loadstring(game:HttpGet(url,true))() end)
-    end)
+    task.spawn(function() pcall(function() loadstring(game:HttpGet(url,true))() end) end)
 end
 
--- ──────────────────────────── [7] SESSION TIMER + JOIN SCRIPT ───────────
-local SESSION_START = os.clock()
-local function GetSessionTime()
-    local e=math.floor(os.clock()-SESSION_START)
-    return string.format("%02d:%02d:%02d",math.floor(e/3600),math.floor((e%3600)/60),e%60)
-end
-local JOIN_SCRIPT = string.format(
-    'game:GetService("TeleportService"):TeleportToPlaceInstance(%d, "%s")',
-    game.PlaceId, tostring(game.JobId)
-)
-
--- ──────────────────────────── [8] FRIENDS DATA ──────────────────────────
-local FD = {inSrv=0, online=0, offline=0, total=0, done=false}
-task.spawn(function()
-    local ok, pages = pcall(function() return Players:GetFriendsAsync(LP.UserId) end)
-    if not ok then FD.done=true; return end
-    local srvIds={}; for _,p in ipairs(Players:GetPlayers()) do srvIds[p.UserId]=true end
-    repeat
-        local pok, items = pcall(function() return pages:GetCurrentPage() end)
-        if not pok then break end
-        for _,f in ipairs(items) do
-            FD.total+=1
-            if srvIds[f.Id] then FD.inSrv+=1 end
-            if f.IsOnline then FD.online+=1 else FD.offline+=1 end
-        end
-        if not pages.IsFinished then pcall(function() pages:AdvanceToNextPageAsync() end) end
-    until pages.IsFinished
-    FD.done=true
-end)
-
--- ──────────────────────────── [9] COLOURS (Sirius dark) ─────────────────
+-- ─────────────────────────────── [9] COLOURS ────────────────────────────────
 local C = {
-    -- Window & structural
-    win    = Color3.fromRGB(12, 12, 17),
-    side   = Color3.fromRGB(10, 10, 14),
-    topbar = Color3.fromRGB(14, 14, 20),
-    card   = Color3.fromRGB(18, 18, 26),
-    cell   = Color3.fromRGB(22, 22, 32),
-    border = Color3.fromRGB(28, 28, 40),
-    sep    = Color3.fromRGB(24, 24, 34),
+    -- Base
+    bg      = Color3.fromRGB(10, 10, 15),
+    side    = Color3.fromRGB( 8,  8, 13),
+    topbar  = Color3.fromRGB(13, 13, 20),
+    card    = Color3.fromRGB(17, 17, 25),
+    cell    = Color3.fromRGB(22, 22, 33),
+    border  = Color3.fromRGB(32, 32, 48),
+    sep     = Color3.fromRGB(22, 22, 32),
     -- Nav
-    navAct = Color3.fromRGB(30, 55, 110),
-    navActI= Color3.fromRGB(80, 140, 255),
-    navIco = Color3.fromRGB(65,  65,  82),
+    navAct  = Color3.fromRGB(25, 50, 105),
+    navActI = Color3.fromRGB(88, 148, 255),
+    navIco  = Color3.fromRGB(68,  68,  88),
     -- Text
-    tPri   = Color3.fromRGB(235, 235, 240),
-    tSec   = Color3.fromRGB(135, 135, 150),
-    tDim   = Color3.fromRGB(72,  72,  88),
+    tPri    = Color3.fromRGB(238, 238, 245),
+    tSec    = Color3.fromRGB(140, 140, 158),
+    tDim    = Color3.fromRGB(72,  72,  92),
     -- Toggles
-    togOn  = Color3.fromRGB(65, 125, 255),
-    togOff = Color3.fromRGB(40,  40,  52),
-    knob   = Color3.fromRGB(225, 225, 232),
-    -- Accent
-    ok     = Color3.fromRGB(68,  200, 115),
-    err    = Color3.fromRGB(210,  58,  58),
-    warn   = Color3.fromRGB(215, 160,  42),
-    orange = Color3.fromRGB(230, 110,  35),
-    gold   = Color3.fromRGB(240, 195,  72),
-    sky    = Color3.fromRGB(100, 180, 255),
-    purple = Color3.fromRGB(110,  65, 215),
-    -- Codex card backgrounds
-    codexOk  = Color3.fromRGB(12, 38, 22),
-    codexErr = Color3.fromRGB(38, 12, 12),
-    -- Welcome card
-    welBg  = Color3.fromRGB(20, 30, 55),
-    welBdr = Color3.fromRGB(35, 52, 95),
-    -- Server card
-    srvBg  = Color3.fromRGB(16, 16, 24),
-    -- Friends card
-    friBg  = Color3.fromRGB(16, 16, 24),
-    -- Discord card
-    discBg = Color3.fromRGB(38, 58, 170),
+    togOn   = Color3.fromRGB(72, 128, 255),
+    togOff  = Color3.fromRGB(38,  38,  52),
+    knob    = Color3.fromRGB(225, 225, 232),
+    -- Status
+    ok      = Color3.fromRGB(68,  205, 118),
+    err     = Color3.fromRGB(212,  58,  58),
+    warn    = Color3.fromRGB(218, 162,  42),
+    orange  = Color3.fromRGB(228, 112,  35),
+    gold    = Color3.fromRGB(248, 202,  72),
+    sky     = Color3.fromRGB(98,  182, 255),
+    purple  = Color3.fromRGB(112,  68, 218),
+    pink    = Color3.fromRGB(225, 105, 185),
+    -- Cards
+    welBg   = Color3.fromRGB(18,  28,  58),
+    welBdr  = Color3.fromRGB(35,  55,  98),
+    discBg  = Color3.fromRGB(35,  55, 168),
+    premBg  = Color3.fromRGB(42,  28,   8),
+    premBdr = Color3.fromRGB(180, 140,  35),
+    premIco = Color3.fromRGB(248, 202,  72),
+    keyBg   = Color3.fromRGB(12,  12,  18),
+    keyBdr  = Color3.fromRGB(42,  42,  68),
 }
 
--- ──────────────────────────── [10] STATE ─────────────────────────────────
+-- ─────────────────────────────── [10] STATE ─────────────────────────────────
 local S = {
-    god=false, noclip=false, fly=false, infJump=false,
-    spin=false, invis=false, esp=false, tracer=false,
-    cham=false, showHP=false, showDist=false, fullbrite=false,
-    fov=false, xhair=false, ndsAuto=false, spd=16, jmp=50,
+    god=false, noclip=false, fly=false, infJump=false, spin=false,
+    invis=false, esp=false, tracer=false, cham=false,
+    showHP=false, showDist=false, fullbrite=false,
+    fov=false, xhair=false, ndsAuto=false,
+    antiVoid=false, speedHack=false, jumpHack=false,
+    spd=16, jmp=50, fovSize=180,
 }
-local flyBV,flyBG,spinBAV = nil,nil,nil
+local flyBV, flyBG, spinBAV = nil,nil,nil
 local flingBusy = false
 local fps_val   = 60
+local SESSION_START = os.time()
 
--- ──────────────────────────── [11] UTILS ─────────────────────────────────
+-- ─────────────────────────────── [11] UTILS ─────────────────────────────────
 local function Corn(p,r) local c=Instance.new("UICorner"); c.CornerRadius=UDim.new(0,r or 8); c.Parent=p; return c end
 local function Strk(p,col,t) local s=Instance.new("UIStroke"); s.Color=col or C.border; s.Thickness=t or 1; s.Parent=p; return s end
 local function Pad(p,t,b,l,r) local x=Instance.new("UIPadding"); x.PaddingTop=UDim.new(0,t or 0); x.PaddingBottom=UDim.new(0,b or 0); x.PaddingLeft=UDim.new(0,l or 0); x.PaddingRight=UDim.new(0,r or 0); x.Parent=p end
 local function ListL(p,dir,gap) local l=Instance.new("UIListLayout"); l.FillDirection=dir or Enum.FillDirection.Vertical; l.Padding=UDim.new(0,gap or 0); l.SortOrder=Enum.SortOrder.LayoutOrder; l.Parent=p; return l end
-local function Tw(o,t,props) TwnSvc:Create(o,TweenInfo.new(t,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),props):Play() end
+local function Tw(o,t,props,style,dir) TwnSvc:Create(o,TweenInfo.new(t,style or Enum.EasingStyle.Quad,dir or Enum.EasingDirection.Out),props):Play() end
+local function TwB(o,t,props) TwnSvc:Create(o,TweenInfo.new(t,Enum.EasingStyle.Back,Enum.EasingDirection.Out),props):Play() end
+
 local function GetRoot(p) local c=p and p.Character; return c and c:FindFirstChild("HumanoidRootPart") end
 local function GetHum(p)  local c=p and p.Character; return c and c:FindFirstChildOfClass("Humanoid") end
 local function FindP(q)
@@ -169,56 +185,59 @@ local function FindP(q)
         if p.Name:lower():find(lo,1,true) or p.DisplayName:lower():find(lo,1,true) then return p end
     end
 end
-local function Greet()
-    local h=tonumber(os.date("%H")) or 12
-    return h<12 and "Good Morning!" or h<18 and "Good Afternoon!" or "Good Evening!"
-end
-local function Ping()
-    local ok,v=pcall(function() return math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()) end)
-    return ok and (v.."ms") or "N/A"
-end
+local function Ping() local ok,v=pcall(function() return math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()) end); return ok and v.."ms" or "N/A" end
+local function Greet() local h=tonumber(os.date("%H")) or 12; return h<12 and "Good Morning!" or h<18 and "Good Afternoon!" or "Good Evening!" end
+local function FmtTime(s) return string.format("%02d:%02d:%02d",math.floor(s/3600),math.floor((s%3600)/60),s%60) end
+local function GetSession() return FmtTime(math.max(0,os.time()-SESSION_START)) end
 
--- ──────────────────────────── [12] NDS DISASTER ─────────────────────────
-local NDS_NAMES={Flood="Flood",Fire="Fire",Meteorite="Meteor Shower",Earthquake="Earthquake",Tsunami="Tsunami",Tornado="Tornado",Blizzard="Blizzard",AcidRain="Acid Rain",Sandstorm="Sandstorm",VolcanicEruption="Volcanic Eruption",FlashFlood="Flash Flood",ToxicGas="Toxic Gas",SuperHeat="Super Heat",Lightning="Lightning Storm",IceStorm="Ice Storm",ThunderStorm="Thunder Storm",MeteorShower="Meteor Shower",HailStorm="Hail Storm"}
+-- ─────────────────────────────── [12] NDS DISASTER ──────────────────────────
+local NDS_MAP={Flood="🌊 Flood",Fire="🔥 Fire",Meteorite="☄️ Meteor Shower",Earthquake="💥 Earthquake",Tsunami="🌊 Tsunami",Tornado="🌪️ Tornado",Blizzard="❄️ Blizzard",AcidRain="☠️ Acid Rain",Sandstorm="🏜️ Sandstorm",VolcanicEruption="🌋 Volcanic Eruption",FlashFlood="🌊 Flash Flood",ToxicGas="☠️ Toxic Gas",SuperHeat="🌡️ Super Heat",Lightning="⚡ Lightning Storm",IceStorm="❄️ Ice Storm",ThunderStorm="⛈️ Thunder Storm",MeteorShower="☄️ Meteor Shower",HailStorm="🌨️ Hail Storm"}
 local function GetDisaster()
-    for name,disp in pairs(NDS_NAMES) do if workspace:FindFirstChild(name) then return disp end end
-    for _,ch in ipairs(workspace:GetChildren()) do local n=ch.Name:lower(); for _,kw in ipairs({"flood","fire","meteor","quake","tsunami","tornado","blizzard","acid","sand","volcan","toxic","heat","hail","lightning","ice","thunder"}) do if n:find(kw,1,true) and ch:IsA("Model") then return ch.Name end end end
+    for name,disp in pairs(NDS_MAP) do if workspace:FindFirstChild(name) then return disp end end
+    for _,ch in ipairs(workspace:GetChildren()) do local n=ch.Name:lower(); for _,kw in ipairs({"flood","fire","meteor","quake","tsunami","tornado","blizzard","acid","sand","volcan","toxic","heat","hail","lightning","ice","thunder"}) do if n:find(kw,1,true) and ch:IsA("Model") then return "⚠️ "..ch.Name end end end
     local rs=game:GetService("ReplicatedStorage")
     for _,root in ipairs({rs,workspace}) do for _,v in ipairs(root:GetChildren()) do if v:IsA("StringValue") then local n=v.Name:lower(); if (n=="disaster" or n=="currentdisaster" or n=="selecteddisaster") and v.Value~="" and v.Value~="None" then return v.Value end end end end
     local cd=workspace:FindFirstChild("Countdown") or workspace:FindFirstChild("CountDown")
-    if cd and (cd:IsA("IntValue") or cd:IsA("NumberValue")) and (cd.Value or 0)>0 then return "Active — "..cd.Value.."s left" end
+    if cd and (cd:IsA("IntValue") or cd:IsA("NumberValue")) and (cd.Value or 0)>0 then return "⏱️ Active — "..cd.Value.."s left" end
     return "None / Waiting"
 end
 
--- ──────────────────────────── [13] ESP ──────────────────────────────────
+-- ─────────────────────────────── [13] ESP ───────────────────────────────────
 local ESPData={};local ChamData={}
 local function ESPCol(p) return Color3.fromHSV(((p.UserId or 1)%600)/600,0.9,1) end
-local function NewDraw(k,pr) if not DrawOK then return {Visible=false,Remove=function()end} end local d=Drawing.new(k); for kk,vv in pairs(pr) do pcall(function() d[kk]=vv end) end; return d end
-local function InitESP(p) if p==LP or ESPData[p] then return end local col=ESPCol(p); ESPData[p]={box=NewDraw("Square",{Visible=false,Color=col,Thickness=1.4,Filled=false}),name=NewDraw("Text",{Visible=false,Color=col,Size=13,Font=DFont,Outline=true,Text=p.Name,Center=true}),hp=NewDraw("Text",{Visible=false,Color=C.ok,Size=11,Font=DFont,Outline=true,Center=true}),hbBg=NewDraw("Square",{Visible=false,Color=Color3.fromRGB(18,18,18),Thickness=0,Filled=true}),hbFill=NewDraw("Square",{Visible=false,Color=C.ok,Thickness=0,Filled=true}),tracer=NewDraw("Line",{Visible=false,Color=col,Thickness=1.2,Transparency=0.4})} end
+local function NewDraw(k,pr) if not DrawOK then return {Visible=false,Remove=function()end} end; local d=Drawing.new(k); for kk,vv in pairs(pr) do pcall(function() d[kk]=vv end) end; return d end
+local function InitESP(p)
+    if p==LP or ESPData[p] then return end; local col=ESPCol(p)
+    ESPData[p]={box=NewDraw("Square",{Visible=false,Color=col,Thickness=1.4,Filled=false}),name=NewDraw("Text",{Visible=false,Color=col,Size=13,Font=DFont,Outline=true,Text=p.Name,Center=true}),hp=NewDraw("Text",{Visible=false,Color=C.ok,Size=11,Font=DFont,Outline=true,Center=true}),hbBg=NewDraw("Square",{Visible=false,Color=Color3.fromRGB(15,15,15),Thickness=0,Filled=true}),hbFill=NewDraw("Square",{Visible=false,Color=C.ok,Thickness=0,Filled=true}),tracer=NewDraw("Line",{Visible=false,Color=col,Thickness=1.2,Transparency=0.4})}
+end
 local function KillESP(p) if ESPData[p] then for _,d in pairs(ESPData[p]) do pcall(function() d:Remove() end) end; ESPData[p]=nil end end
 local function HideESP(d) for _,v in pairs(d) do pcall(function() v.Visible=false end) end end
 local function ClearChams() for p,v in pairs(ChamData) do pcall(function() v:Destroy() end); ChamData[p]=nil end end
 
--- ──────────────────────────── [14] FLING ─────────────────────────────────
+-- ─────────────────────────────── [14] FLING ─────────────────────────────────
 local function FlingOne(victim)
     if flingBusy then return end; flingBusy=true
     local mr=GetRoot(LP); if not mr then flingBusy=false; return end
     local cf=mr.CFrame; local sg=S.god
     S.god=true; local h=GetHum(LP); if h then h.MaxHealth=math.huge; h.Health=math.huge end
     local bav=Instance.new("BodyAngularVelocity"); bav.MaxTorque=Vector3.new(0,math.huge,0); bav.AngularVelocity=Vector3.new(0,999999,0); bav.P=math.huge; bav.Parent=mr
-    for i=1,16 do local tr=GetRoot(victim); if not tr then break end; pcall(function() mr.CFrame=tr.CFrame*CFrame.new(2.5,0,0) end); task.wait(0.05) end
+    for _=1,16 do local tr=GetRoot(victim); if not tr then break end; pcall(function() mr.CFrame=tr.CFrame*CFrame.new(2.5,0,0) end); task.wait(0.05) end
     pcall(function() bav:Destroy() end); task.wait(0.04); pcall(function() mr.CFrame=cf end)
     S.god=sg; if not sg then local hh=GetHum(LP); if hh then hh.MaxHealth=100; hh.Health=math.min(100,hh.Health) end end
     task.wait(0.5); flingBusy=false
 end
 local function FlingAll() local t={}; for _,p in ipairs(Players:GetPlayers()) do if p~=LP then table.insert(t,p) end end; for _,p in ipairs(t) do task.spawn(FlingOne,p); task.wait(0.15) end end
 
--- ──────────────────────────── [15] RUNTIME LOOPS ────────────────────────
+-- ─────────────────────────────── [15] RUNTIME LOOPS ────────────────────────
 RunSvc.RenderStepped:Connect(function(dt) fps_val=math.floor(1/math.max(dt,0.001)) end)
 RunSvc.Heartbeat:Connect(function()
     if S.god then local h=GetHum(LP); if h then if h.MaxHealth~=math.huge then h.MaxHealth=math.huge end; if h.Health<math.huge then h.Health=math.huge end end end
     if S.ndsAuto then local r=GetRoot(LP); if r and r.Position.Y<90 then pcall(function() r.CFrame=CFrame.new(r.Position.X,320,r.Position.Z) end) end end
-    local r=GetRoot(LP); if r then if S.spin then if not spinBAV then spinBAV=Instance.new("BodyAngularVelocity"); spinBAV.AngularVelocity=Vector3.new(0,9999,0); spinBAV.MaxTorque=Vector3.new(math.huge,math.huge,math.huge); spinBAV.Parent=r end else if spinBAV then pcall(function() spinBAV:Destroy() end); spinBAV=nil end end end
+    if S.antiVoid then local r=GetRoot(LP); if r and r.Position.Y<-80 then pcall(function() r.CFrame=CFrame.new(r.Position.X,50,r.Position.Z) end) end end
+    local r=GetRoot(LP); if r then
+        if S.spin then if not spinBAV then spinBAV=Instance.new("BodyAngularVelocity"); spinBAV.AngularVelocity=Vector3.new(0,9999,0); spinBAV.MaxTorque=Vector3.new(math.huge,math.huge,math.huge); spinBAV.Parent=r end
+        else if spinBAV then pcall(function() spinBAV:Destroy() end); spinBAV=nil end end
+    end
 end)
 RunSvc.Stepped:Connect(function() if S.noclip and LP.Character then for _,p in ipairs(LP.Character:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end end)
 RunSvc.RenderStepped:Connect(function()
@@ -230,13 +249,12 @@ RunSvc.RenderStepped:Connect(function()
     if UIS:IsKeyDown(Enum.KeyCode.W) then dir=dir+cc.CFrame.LookVector end; if UIS:IsKeyDown(Enum.KeyCode.S) then dir=dir-cc.CFrame.LookVector end
     if UIS:IsKeyDown(Enum.KeyCode.A) then dir=dir-cc.CFrame.RightVector end; if UIS:IsKeyDown(Enum.KeyCode.D) then dir=dir+cc.CFrame.RightVector end
     if UIS:IsKeyDown(Enum.KeyCode.Space) then dir=dir+Vector3.new(0,1,0) end; if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then dir=dir-Vector3.new(0,1,0) end
-    flyBV.Velocity=(dir.Magnitude>0 and dir.Unit or Vector3.zero)*75; flyBG.CFrame=cc.CFrame
+    flyBV.Velocity=(dir.Magnitude>0 and dir.Unit or Vector3.zero)*80; flyBG.CFrame=cc.CFrame
 end)
 UIS.JumpRequest:Connect(function() if S.infJump then local h=GetHum(LP); if h and h:GetState()==Enum.HumanoidStateType.Freefall then h:ChangeState(Enum.HumanoidStateType.Jumping) end end end)
 LP.CharacterAdded:Connect(function() task.wait(0.5); local h=GetHum(LP); if not h then return end; h.WalkSpeed=S.spd; h.JumpPower=S.jmp; if S.god then h.MaxHealth=math.huge; h.Health=math.huge end end)
 Players.PlayerRemoving:Connect(function(p) KillESP(p); if ChamData[p] then pcall(function() ChamData[p]:Destroy() end); ChamData[p]=nil end end)
 Players.PlayerAdded:Connect(function(p) p.CharacterAdded:Connect(function() task.wait(0.6); if S.esp or S.tracer then InitESP(p) end; if S.cham and p.Character and not ChamData[p] then local sel=Instance.new("SelectionBox"); sel.Adornee=p.Character; sel.Color3=ESPCol(p); sel.LineThickness=0.05; sel.SurfaceTransparency=0.72; sel.SurfaceColor3=ESPCol(p); sel.Parent=CoreGui; ChamData[p]=sel end end) end)
--- ESP render loop
 RunSvc.RenderStepped:Connect(function()
     local vp=Cam.ViewportSize; local ori=Vector2.new(vp.X/2,vp.Y)
     for _,p in ipairs(Players:GetPlayers()) do
@@ -252,134 +270,256 @@ RunSvc.RenderStepped:Connect(function()
         local dist=math.floor((root.Position-Cam.CFrame.Position).Magnitude); local col=ESPCol(p)
         if S.esp then pcall(function()
             d.box.Visible=true; d.box.Color=col; d.box.Position=Vector2.new(sx-boxW/2,spT.Y); d.box.Size=Vector2.new(boxW,boxH)
-            d.name.Visible=true; d.name.Color=col; d.name.Position=Vector2.new(sx,spT.Y-16); d.name.Text=S.showDist and (p.Name.." ["..dist.."m]") or p.Name
-            if S.showHP and hum then local hp=math.max(0,hum.Health); local mp=math.max(1,hum.MaxHealth); local r=math.clamp(hp/mp,0,1); local hc=Color3.new(1-r,r*0.88,0.05); d.hp.Visible=true; d.hp.Color=hc; d.hp.Position=Vector2.new(sx,spB.Y+3); d.hp.Text=math.floor(hp).." HP"; d.hbBg.Visible=true; d.hbBg.Position=Vector2.new(sx-boxW/2-7,spT.Y); d.hbBg.Size=Vector2.new(4,boxH); d.hbFill.Visible=true; d.hbFill.Color=hc; d.hbFill.Position=Vector2.new(sx-boxW/2-7,spT.Y+boxH*(1-r)); d.hbFill.Size=Vector2.new(4,boxH*r) else d.hp.Visible=false; d.hbBg.Visible=false; d.hbFill.Visible=false end
+            d.name.Visible=true; d.name.Color=col; d.name.Position=Vector2.new(sx,spT.Y-17); d.name.Text=S.showDist and p.Name.." ["..dist.."m]" or p.Name
+            if S.showHP and hum then local hp=math.max(0,hum.Health); local mp=math.max(1,hum.MaxHealth); local r2=math.clamp(hp/mp,0,1); local hc=Color3.new(1-r2,r2*0.88,0.05); d.hp.Visible=true; d.hp.Color=hc; d.hp.Position=Vector2.new(sx,spB.Y+3); d.hp.Text=math.floor(hp).." HP"; d.hbBg.Visible=true; d.hbBg.Position=Vector2.new(sx-boxW/2-7,spT.Y); d.hbBg.Size=Vector2.new(4,boxH); d.hbFill.Visible=true; d.hbFill.Color=hc; d.hbFill.Position=Vector2.new(sx-boxW/2-7,spT.Y+boxH*(1-r2)); d.hbFill.Size=Vector2.new(4,boxH*r2) else d.hp.Visible=false; d.hbBg.Visible=false; d.hbFill.Visible=false end
         end) else d.box.Visible=false; d.name.Visible=false; d.hp.Visible=false; d.hbBg.Visible=false; d.hbFill.Visible=false end
         if S.tracer then pcall(function() d.tracer.Visible=true; d.tracer.Color=col; d.tracer.From=ori; d.tracer.To=Vector2.new(sx,sy) end) else pcall(function() d.tracer.Visible=false end) end
     end
     for p in pairs(ESPData) do if not p or not p.Parent then KillESP(p) end end
 end)
 
--- ═══════════════════════════════════════════════════════════════════════
---   LOADING SCREEN
--- ═══════════════════════════════════════════════════════════════════════
-local LoadGui=Instance.new("ScreenGui"); LoadGui.Name="LunaLoading"; LoadGui.ResetOnSpawn=false; LoadGui.IgnoreGuiInset=true; LoadGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; LoadGui.Parent=CoreGui
-local LBG=Instance.new("Frame"); LBG.BackgroundColor3=Color3.fromRGB(6,6,10); LBG.BorderSizePixel=0; LBG.Size=UDim2.new(1,0,1,0); LBG.ZIndex=100; LBG.Parent=LoadGui
-local LCard=Instance.new("Frame"); LCard.AnchorPoint=Vector2.new(0.5,0.5); LCard.BackgroundColor3=Color3.fromRGB(16,16,22); LCard.BorderSizePixel=0; LCard.Position=UDim2.new(0.5,0,0.5,0); LCard.Size=UDim2.new(0,240,0,195); LCard.ZIndex=101; LCard.Parent=LBG; Corn(LCard,18); Strk(LCard,C.border,1)
-local LF=Instance.new("TextLabel"); LF.BackgroundTransparency=1; LF.AnchorPoint=Vector2.new(0.5,0); LF.Position=UDim2.new(0.5,0,0,18); LF.Size=UDim2.new(0,78,0,72); LF.ZIndex=102; LF.Font=Enum.Font.GothamBold; LF.Text="🌸"; LF.TextSize=60; LF.TextColor3=Color3.new(1,1,1); LF.TextXAlignment=Enum.TextXAlignment.Center; LF.Parent=LCard
-local LT=Instance.new("TextLabel"); LT.BackgroundTransparency=1; LT.AnchorPoint=Vector2.new(0.5,0); LT.Position=UDim2.new(0.5,0,0,98); LT.Size=UDim2.new(1,0,0,24); LT.ZIndex=102; LT.Font=Enum.Font.GothamBold; LT.Text="Luna Admin"; LT.TextColor3=C.tPri; LT.TextSize=19; LT.TextXAlignment=Enum.TextXAlignment.Center; LT.Parent=LCard
-local LD=Instance.new("TextLabel"); LD.BackgroundTransparency=1; LD.AnchorPoint=Vector2.new(0.5,0); LD.Position=UDim2.new(0.5,0,0,126); LD.Size=UDim2.new(1,0,0,18); LD.ZIndex=102; LD.Font=Enum.Font.Gotham; LD.Text="Loading..."; LD.TextColor3=C.tSec; LD.TextSize=12; LD.TextXAlignment=Enum.TextXAlignment.Center; LD.Parent=LCard
-local LV=Instance.new("TextLabel"); LV.BackgroundTransparency=1; LV.AnchorPoint=Vector2.new(0.5,1); LV.Position=UDim2.new(0.5,0,1,-8); LV.Size=UDim2.new(1,0,0,14); LV.ZIndex=102; LV.Font=Enum.Font.Gotham; LV.Text="V4 Sirius  ·  PC & Mobile"; LV.TextColor3=C.tDim; LV.TextSize=10; LV.TextXAlignment=Enum.TextXAlignment.Center; LV.Parent=LCard
-task.spawn(function() local d=0; while LD and LD.Parent do task.wait(0.35); d=d%3+1; pcall(function() LD.Text="Loading"..string.rep(".",d) end) end end)
-task.spawn(function() while LF and LF.Parent do TwnSvc:Create(LF,TweenInfo.new(0.85,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{TextTransparency=0.45}):Play(); task.wait(0.85); TwnSvc:Create(LF,TweenInfo.new(0.85,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut),{TextTransparency=0}):Play(); task.wait(0.85) end end)
-LCard.Size=UDim2.new(0,0,0,0); LCard.BackgroundTransparency=1
-TwnSvc:Create(LCard,TweenInfo.new(0.48,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Size=UDim2.new(0,240,0,195),BackgroundTransparency=0}):Play()
+-- ─────────────────────────────── [16] FRIENDS DATA ──────────────────────────
+local FD={inSrv=0,online=0,offline=0,total=0,done=false}
+task.spawn(function()
+    local ok,pages=pcall(function() return Players:GetFriendsAsync(LP.UserId) end)
+    if not ok then FD.done=true; return end
+    local srvIds={}; for _,p in ipairs(Players:GetPlayers()) do srvIds[p.UserId]=true end
+    repeat
+        local pok,items=pcall(function() return pages:GetCurrentPage() end); if not pok then break end
+        for _,f in ipairs(items) do FD.total+=1; if srvIds[f.Id] then FD.inSrv+=1 end; if f.IsOnline then FD.online+=1 else FD.offline+=1 end end
+        if not pages.IsFinished then pcall(function() pages:AdvanceToNextPageAsync() end) end
+    until pages.IsFinished; FD.done=true
+end)
 
--- ═══════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
+--   LOADING SCREEN
+-- ═══════════════════════════════════════════════════════════════════════════
+local LoadGui=Instance.new("ScreenGui"); LoadGui.Name="LunaLoading"; LoadGui.ResetOnSpawn=false; LoadGui.IgnoreGuiInset=true; LoadGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; LoadGui.Parent=CoreGui
+
+local LBG=Instance.new("Frame"); LBG.BackgroundColor3=Color3.fromRGB(5,5,8); LBG.BorderSizePixel=0; LBG.Size=UDim2.new(1,0,1,0); LBG.ZIndex=100; LBG.Parent=LoadGui
+
+-- Animated particles on loading screen
+task.spawn(function()
+    while LBG and LBG.Parent do
+        task.wait(0.3)
+        local pt=Instance.new("Frame"); pt.BackgroundColor3=Color3.fromHSV(math.random()*0.2+0.55,0.6,0.9); pt.BackgroundTransparency=0.3; pt.BorderSizePixel=0; pt.AnchorPoint=Vector2.new(0.5,0.5); pt.Position=UDim2.new(math.random()*0.85+0.05,0,1.1,0); local sz=math.random(2,6); pt.Size=UDim2.new(0,sz,0,sz); pt.ZIndex=99; pt.Parent=LBG; Corn(pt,99)
+        TwnSvc:Create(pt,TweenInfo.new(math.random(25,45)/10,Enum.EasingStyle.Linear),{Position=UDim2.new(pt.Position.X.Scale,0,-0.08,0),BackgroundTransparency=1}):Play()
+        task.delay(5,function() pcall(function() pt:Destroy() end) end)
+    end
+end)
+
+local LCard=Instance.new("Frame"); LCard.AnchorPoint=Vector2.new(0.5,0.5); LCard.BackgroundColor3=Color3.fromRGB(14,14,22); LCard.BorderSizePixel=0; LCard.Position=UDim2.new(0.5,0,0.5,0); LCard.Size=UDim2.new(0,260,0,205); LCard.ZIndex=101; LCard.Parent=LBG; Corn(LCard,20); Strk(LCard,C.border,1)
+
+-- Gradient on loading card
+local LGrad=Instance.new("UIGradient"); LGrad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(20,20,35)),ColorSequenceKeypoint.new(1,Color3.fromRGB(10,10,18))}); LGrad.Rotation=135; LGrad.Parent=LCard
+
+local LF=Instance.new("TextLabel"); LF.BackgroundTransparency=1; LF.AnchorPoint=Vector2.new(0.5,0); LF.Position=UDim2.new(0.5,0,0,16); LF.Size=UDim2.new(0,75,0,75); LF.ZIndex=102; LF.Font=Enum.Font.GothamBold; LF.Text="🌸"; LF.TextSize=60; LF.TextColor3=Color3.new(1,1,1); LF.TextXAlignment=Enum.TextXAlignment.Center; LF.Parent=LCard
+task.spawn(function() while LF and LF.Parent do Tw(LF,0.9,{TextTransparency=0.45},Enum.EasingStyle.Sine); task.wait(0.9); Tw(LF,0.9,{TextTransparency=0},Enum.EasingStyle.Sine); task.wait(0.9) end end)
+
+local LT=Instance.new("TextLabel"); LT.BackgroundTransparency=1; LT.AnchorPoint=Vector2.new(0.5,0); LT.Position=UDim2.new(0.5,0,0,96); LT.Size=UDim2.new(1,0,0,26); LT.ZIndex=102; LT.Font=Enum.Font.GothamBold; LT.Text="Luna Admin"; LT.TextColor3=C.tPri; LT.TextSize=20; LT.TextXAlignment=Enum.TextXAlignment.Center; LT.Parent=LCard
+
+local LSubT=Instance.new("TextLabel"); LSubT.BackgroundTransparency=1; LSubT.AnchorPoint=Vector2.new(0.5,0); LSubT.Position=UDim2.new(0.5,0,0,124); LSubT.Size=UDim2.new(1,0,0,16); LSubT.ZIndex=102; LSubT.Font=Enum.Font.GothamMedium; LSubT.Text="Aurora Edition"; LSubT.TextColor3=C.gold; LSubT.TextSize=12; LSubT.TextXAlignment=Enum.TextXAlignment.Center; LSubT.Parent=LCard
+
+-- Loading bar
+local LBarBg=Instance.new("Frame"); LBarBg.BackgroundColor3=Color3.fromRGB(25,25,38); LBarBg.BorderSizePixel=0; LBarBg.AnchorPoint=Vector2.new(0.5,0); LBarBg.Position=UDim2.new(0.5,0,0,148); LBarBg.Size=UDim2.new(0,200,0,4); LBarBg.ZIndex=102; LBarBg.Parent=LCard; Corn(LBarBg,99)
+local LBar=Instance.new("Frame"); LBar.BackgroundColor3=C.togOn; LBar.BorderSizePixel=0; LBar.Size=UDim2.new(0,0,1,0); LBar.ZIndex=103; LBar.Parent=LBarBg; Corn(LBar,99)
+TwnSvc:Create(LBar,TweenInfo.new(2.4,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{Size=UDim2.new(1,0,1,0)}):Play()
+
+local LD=Instance.new("TextLabel"); LD.BackgroundTransparency=1; LD.AnchorPoint=Vector2.new(0.5,0); LD.Position=UDim2.new(0.5,0,0,158); LD.Size=UDim2.new(1,0,0,16); LD.ZIndex=102; LD.Font=Enum.Font.Gotham; LD.Text="Initializing..."; LD.TextColor3=C.tSec; LD.TextSize=11; LD.TextXAlignment=Enum.TextXAlignment.Center; LD.Parent=LCard
+local LV=Instance.new("TextLabel"); LV.BackgroundTransparency=1; LV.AnchorPoint=Vector2.new(0.5,1); LV.Position=UDim2.new(0.5,0,1,-8); LV.Size=UDim2.new(1,0,0,13); LV.ZIndex=102; LV.Font=Enum.Font.Gotham; LV.Text="V5 Aurora  ·  2-Day Script  ·  "..EXEC_NAME; LV.TextColor3=C.tDim; LV.TextSize=9; LV.TextXAlignment=Enum.TextXAlignment.Center; LV.Parent=LCard
+
+local loadMsgs={"Initializing...","Loading modules...","Preparing ESP...","Setting up UI...","Connecting...","Almost there..."}
+task.spawn(function()
+    for _,msg in ipairs(loadMsgs) do task.wait(0.4); pcall(function() LD.Text=msg end) end
+end)
+
+LCard.Size=UDim2.new(0,0,0,0); LCard.BackgroundTransparency=1
+TwB(LCard,0.5,{Size=UDim2.new(0,260,0,205),BackgroundTransparency=0})
+
+-- ═══════════════════════════════════════════════════════════════════════════
 --   MAIN GUI
--- ═══════════════════════════════════════════════════════════════════════
+-- ═══════════════════════════════════════════════════════════════════════════
 local Gui=Instance.new("ScreenGui"); Gui.Name="LunaAdmin"; Gui.ResetOnSpawn=false; Gui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling; Gui.IgnoreGuiInset=true; Gui.Enabled=false; Gui.Parent=CoreGui
 
--- Crosshair / FOV overlays
+-- Crosshair overlays
 local CrH=Instance.new("Frame"); CrH.BackgroundColor3=C.err; CrH.BorderSizePixel=0; CrH.AnchorPoint=Vector2.new(0.5,0.5); CrH.Position=UDim2.new(0.5,0,0.5,0); CrH.Size=UDim2.new(0,20,0,2); CrH.ZIndex=55; CrH.Visible=false; CrH.Parent=Gui; Corn(CrH,99)
 local CrV=Instance.new("Frame"); CrV.BackgroundColor3=C.err; CrV.BorderSizePixel=0; CrV.AnchorPoint=Vector2.new(0.5,0.5); CrV.Position=UDim2.new(0.5,0,0.5,0); CrV.Size=UDim2.new(0,2,0,20); CrV.ZIndex=55; CrV.Visible=false; CrV.Parent=Gui; Corn(CrV,99)
 local FovCirc=Instance.new("Frame"); FovCirc.BackgroundTransparency=1; FovCirc.AnchorPoint=Vector2.new(0.5,0.5); FovCirc.Position=UDim2.new(0.5,0,0.5,0); FovCirc.Size=UDim2.new(0,180,0,180); FovCirc.ZIndex=54; FovCirc.Visible=false; FovCirc.Parent=Gui; Corn(FovCirc,999); Strk(FovCirc,C.togOn,1.5)
 
--- ─────────────────────────────── WINDOW ─────────────────────────────────
+-- ─── WINDOW ─────────────────────────────────────────────────────────────────
 local Win=Instance.new("Frame"); Win.Name="Window"; Win.AnchorPoint=Vector2.new(0.5,0.5)
-Win.BackgroundColor3=C.win; Win.BorderSizePixel=0
+Win.BackgroundColor3=C.bg; Win.BorderSizePixel=0
 Win.Position=UDim2.new(0.5,0,0.5,0); Win.Size=UDim2.new(0,WIN_W,0,WIN_H)
-Win.ZIndex=1; Win.ClipsDescendants=true; Win.Parent=Gui; Corn(Win,14); Strk(Win,C.border,1)
+Win.ZIndex=1; Win.ClipsDescendants=true; Win.Parent=Gui; Corn(Win,16); Strk(Win,C.border,1)
 
--- ═══════════════════════════════════════════════════════════════════════
+-- Subtle gradient on window
+local WinGrad=Instance.new("UIGradient"); WinGrad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(14,14,22)),ColorSequenceKeypoint.new(0.5,Color3.fromRGB(10,10,15)),ColorSequenceKeypoint.new(1,Color3.fromRGB(12,12,18))}); WinGrad.Rotation=145; WinGrad.Parent=Win
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--   KEY SYSTEM UI  (modal, appears over main window)
+-- ═══════════════════════════════════════════════════════════════════════════
+local KeyOverlay=Instance.new("Frame"); KeyOverlay.BackgroundColor3=Color3.fromRGB(0,0,0); KeyOverlay.BackgroundTransparency=0.55; KeyOverlay.BorderSizePixel=0; KeyOverlay.Size=UDim2.new(1,0,1,0); KeyOverlay.ZIndex=80; KeyOverlay.Visible=false; KeyOverlay.Parent=Gui
+
+local KeyCard=Instance.new("Frame"); KeyCard.AnchorPoint=Vector2.new(0.5,0.5); KeyCard.BackgroundColor3=C.keyBg; KeyCard.BorderSizePixel=0; KeyCard.Position=UDim2.new(0.5,0,0.5,0); KeyCard.Size=UDim2.new(0,IS_MOBILE and 350 or 440,0,340); KeyCard.ZIndex=81; KeyCard.Parent=Gui; Corn(KeyCard,20); Strk(KeyCard,C.keyBdr,1)
+
+-- Key card gradient
+local KCGrad=Instance.new("UIGradient"); KCGrad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(16,16,28)),ColorSequenceKeypoint.new(1,Color3.fromRGB(10,10,18))}); KCGrad.Rotation=160; KCGrad.Parent=KeyCard
+
+-- Glow ring around key card
+local KGlow=Instance.new("ImageLabel"); KGlow.BackgroundTransparency=1; KGlow.AnchorPoint=Vector2.new(0.5,0.5); KGlow.Position=UDim2.new(0.5,0,0.5,0); KGlow.Size=UDim2.new(0,520,0,420); KGlow.ZIndex=80; KGlow.Image="rbxassetid://5554236805"; KGlow.ImageColor3=C.togOn; KGlow.ImageTransparency=0.72; KGlow.ScaleType=Enum.ScaleType.Slice; KGlow.SliceCenter=Rect.new(23,23,277,277); KGlow.Parent=Gui
+
+-- Lock icon header
+local KLockBg=Instance.new("Frame"); KLockBg.BackgroundColor3=Color3.fromRGB(25,35,75); KLockBg.BorderSizePixel=0; KLockBg.AnchorPoint=Vector2.new(0.5,0); KLockBg.Position=UDim2.new(0.5,0,0,22); KLockBg.Size=UDim2.new(0,58,0,58); KLockBg.ZIndex=82; KLockBg.Parent=KeyCard; Corn(KLockBg,99)
+local KLockI=Instance.new("TextLabel"); KLockI.BackgroundTransparency=1; KLockI.Size=UDim2.new(1,0,1,0); KLockI.ZIndex=83; KLockI.Font=Enum.Font.GothamBold; KLockI.Text="🔑"; KLockI.TextSize=28; KLockI.TextColor3=Color3.new(1,1,1); KLockI.Parent=KLockBg
+
+local KTitle=Instance.new("TextLabel"); KTitle.BackgroundTransparency=1; KTitle.AnchorPoint=Vector2.new(0.5,0); KTitle.Position=UDim2.new(0.5,0,0,90); KTitle.Size=UDim2.new(0.9,0,0,28); KTitle.ZIndex=82; KTitle.Font=Enum.Font.GothamBold; KTitle.Text="Key System"; KTitle.TextColor3=C.tPri; KTitle.TextSize=22; KTitle.TextXAlignment=Enum.TextXAlignment.Center; KTitle.Parent=KeyCard
+
+local KSub=Instance.new("TextLabel"); KSub.BackgroundTransparency=1; KSub.AnchorPoint=Vector2.new(0.5,0); KSub.Position=UDim2.new(0.5,0,0,120); KSub.Size=UDim2.new(0.88,0,0,36); KSub.ZIndex=82; KSub.Font=Enum.Font.Gotham; KSub.Text="Complete Linkvertise to receive your key.\nKeys are valid for 48 hours."; KSub.TextColor3=C.tSec; KSub.TextSize=11; KSub.TextXAlignment=Enum.TextXAlignment.Center; KSub.TextWrapped=true; KSub.Parent=KeyCard
+
+-- Linkvertise button (gorgeous gradient)
+local LVBtn=Instance.new("TextButton"); LVBtn.AnchorPoint=Vector2.new(0.5,0); LVBtn.Position=UDim2.new(0.5,0,0,165); LVBtn.Size=UDim2.new(0,IS_MOBILE and 300 or 360,0,40); LVBtn.ZIndex=82; LVBtn.Font=Enum.Font.GothamBold; LVBtn.Text="🔗  Open Linkvertise  (copies link)"; LVBtn.TextColor3=Color3.new(1,1,1); LVBtn.TextSize=13; LVBtn.BorderSizePixel=0; LVBtn.BackgroundColor3=Color3.fromRGB(30,60,155); LVBtn.Parent=KeyCard; Corn(LVBtn,10)
+local LVBtnGrad=Instance.new("UIGradient"); LVBtnGrad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(50,100,220)),ColorSequenceKeypoint.new(1,Color3.fromRGB(20,50,145))}); LVBtnGrad.Rotation=90; LVBtnGrad.Parent=LVBtn
+LVBtn.MouseEnter:Connect(function() Tw(LVBtn,0.1,{BackgroundColor3=Color3.fromRGB(40,80,185)}) end); LVBtn.MouseLeave:Connect(function() Tw(LVBtn,0.1,{BackgroundColor3=Color3.fromRGB(30,60,155)}) end)
+LVBtn.MouseButton1Click:Connect(function()
+    CopyClip("https://link-target.net/4060534/h7yytuv1gfVw")
+    LVBtn.Text="✓  Link copied to clipboard!"
+    Tw(LVBtn,0.2,{BackgroundColor3=Color3.fromRGB(35,130,75)})
+    task.delay(2,function() pcall(function() LVBtn.Text="🔗  Open Linkvertise  (copies link)"; Tw(LVBtn,0.2,{BackgroundColor3=Color3.fromRGB(30,60,155)}) end) end)
+end)
+
+-- Key input box
+local KInpBg=Instance.new("Frame"); KInpBg.BackgroundColor3=Color3.fromRGB(20,20,32); KInpBg.BorderSizePixel=0; KInpBg.AnchorPoint=Vector2.new(0.5,0); KInpBg.Position=UDim2.new(0.5,0,0,218); KInpBg.Size=UDim2.new(0,IS_MOBILE and 300 or 360,0,44); KInpBg.ZIndex=82; KInpBg.Parent=KeyCard; Corn(KInpBg,12); local KInpSk=Strk(KInpBg,C.keyBdr,1)
+local KInp=Instance.new("TextBox"); KInp.BackgroundTransparency=1; KInp.Position=UDim2.new(0,14,0,0); KInp.Size=UDim2.new(1,-28,1,0); KInp.ZIndex=83; KInp.Font=Enum.Font.GothamMedium; KInp.PlaceholderText="Enter key (LUNA_XXXXXXXX)"; KInp.PlaceholderColor3=C.tDim; KInp.Text=""; KInp.TextColor3=C.tPri; KInp.TextSize=13; KInp.TextXAlignment=Enum.TextXAlignment.Left; KInp.ClearTextOnFocus=false; KInp.Parent=KInpBg
+KInp.Focused:Connect(function() Tw(KInpSk,0.14,{Color=C.togOn}) end); KInp.FocusLost:Connect(function() Tw(KInpSk,0.14,{Color=C.keyBdr}) end)
+
+-- Check Key button
+local KCheckBtn=Instance.new("TextButton"); KCheckBtn.AnchorPoint=Vector2.new(0.5,0); KCheckBtn.Position=UDim2.new(0.5,0,0,274); KCheckBtn.Size=UDim2.new(0,IS_MOBILE and 300 or 360,0,42); KCheckBtn.ZIndex=82; KCheckBtn.Font=Enum.Font.GothamBold; KCheckBtn.Text="🔓  Check Key"; KCheckBtn.TextColor3=Color3.new(1,1,1); KCheckBtn.TextSize=14; KCheckBtn.BorderSizePixel=0; KCheckBtn.BackgroundColor3=Color3.fromRGB(35,125,68); KCheckBtn.Parent=KeyCard; Corn(KCheckBtn,12)
+local KCheckGrad=Instance.new("UIGradient"); KCheckGrad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(50,165,85)),ColorSequenceKeypoint.new(1,Color3.fromRGB(28,105,55))}); KCheckGrad.Rotation=90; KCheckGrad.Parent=KCheckBtn
+KCheckBtn.MouseEnter:Connect(function() Tw(KCheckBtn,0.1,{BackgroundColor3=Color3.fromRGB(42,145,76)}) end); KCheckBtn.MouseLeave:Connect(function() Tw(KCheckBtn,0.1,{BackgroundColor3=Color3.fromRGB(35,125,68)}) end)
+
+-- Status message
+local KStatus=Instance.new("TextLabel"); KStatus.BackgroundTransparency=1; KStatus.AnchorPoint=Vector2.new(0.5,0); KStatus.Position=UDim2.new(0.5,0,0,322); KStatus.Size=UDim2.new(0.88,0,0,16); KStatus.ZIndex=82; KStatus.Font=Enum.Font.Gotham; KStatus.Text=""; KStatus.TextColor3=C.tSec; KStatus.TextSize=11; KStatus.TextXAlignment=Enum.TextXAlignment.Center; KStatus.Parent=KeyCard
+
+-- Close key UI helper
+local function OpenKeyUI()
+    KeyOverlay.Visible=true; KGlow.Visible=true
+    KeyCard.Visible=true; KeyCard.Size=UDim2.new(0,0,0,0); KeyCard.BackgroundTransparency=1
+    TwB(KeyCard,0.4,{Size=UDim2.new(0,IS_MOBILE and 350 or 440,0,340),BackgroundTransparency=0})
+end
+local function CloseKeyUI()
+    Tw(KeyCard,0.22,{BackgroundTransparency=1,Size=UDim2.new(0,0,0,0)},Enum.EasingStyle.Back,Enum.EasingDirection.In)
+    task.wait(0.25)
+    KeyOverlay.Visible=false; KGlow.Visible=false; KeyCard.Visible=false
+end
+KGlow.Visible=false; KeyCard.Visible=false; KeyOverlay.Visible=false
+
+-- Key check logic
+local lockoutUntil   = 0
+local failedAttempts = 0
+KCheckBtn.MouseButton1Click:Connect(function()
+    if os.clock() < lockoutUntil then
+        KStatus.TextColor3 = C.err
+        KStatus.Text = "⏱️  Wait " .. math.ceil(lockoutUntil - os.clock()) .. "s before retrying"
+        return
+    end
+    local input = KInp.Text
+    if ValidateKey(input) then
+        -- ✅ Key accepted
+        failedAttempts  = 0
+        lockoutUntil    = 0
+        KStatus.TextColor3 = C.ok
+        KStatus.Text       = "✅  Key accepted! Welcome to Premium."
+        Tw(KCheckBtn, 0.2, { BackgroundColor3 = Color3.fromRGB(28,145,72) })
+        KCheckBtn.Text = "✅  Unlocked!"
+        PREMIUM_UNLOCKED = true
+        task.delay(1.2, function()
+            task.spawn(CloseKeyUI)
+            task.delay(0.5, function()
+                for _, cb in ipairs(PREMIUM_FEATURES) do pcall(cb) end
+            end)
+        end)
+    else
+        -- ❌ Wrong key
+        failedAttempts += 1
+        KStatus.TextColor3 = C.err
+        if failedAttempts >= 8 then
+            lockoutUntil = os.clock() + 30
+            KStatus.Text = "❌  Too many attempts. 30s cooldown."
+        elseif input == "" then
+            KStatus.Text = "⚠️  Please enter a key first."
+        else
+            KStatus.Text = "❌  Invalid key. Must start with  LUNA_"
+        end
+        Tw(KInpBg, 0.08, { BackgroundColor3 = Color3.fromRGB(45,18,18) })
+        task.delay(0.5, function() Tw(KInpBg, 0.15, { BackgroundColor3 = Color3.fromRGB(20,20,32) }) end)
+    end
+end)
+
+-- ═══════════════════════════════════════════════════════════════════════════
 --   PC LAYOUT
--- ═══════════════════════════════════════════════════════════════════════
-local PagesList  = {}    -- {page=Frame, btn=Frame, ico=TextLabel, active=bool}
-local ActivePage = nil
+-- ═══════════════════════════════════════════════════════════════════════════
+local PagesList={}; local ActivePage=nil
+
+-- Codex card data (shared by PC and Mobile)
+local codBg  = EXEC_SUPPORTED and Color3.fromRGB(10,38,20) or Color3.fromRGB(38,10,10)
+local codAcc = EXEC_SUPPORTED and C.ok or C.err
+local codMsg = EXEC_SUPPORTED
+    and "Your Executor is kindly Supported by this Script. All features available."
+    or  "Your Executor Isn't Officially Supported By This Script. Some features may be limited."
 
 if not IS_MOBILE then
 
--- ── SIDEBAR (48px icon-only) ─────────────────────────────────────────────
-local Side=Instance.new("Frame"); Side.BackgroundColor3=C.side; Side.BorderSizePixel=0
-Side.Size=UDim2.new(0,SB_W,1,0); Side.ZIndex=2; Side.ClipsDescendants=true; Side.Parent=Win; Corn(Side,14)
-local SidePatch=Instance.new("Frame"); SidePatch.BackgroundColor3=C.side; SidePatch.BorderSizePixel=0; SidePatch.Position=UDim2.new(1,-14,0,0); SidePatch.Size=UDim2.new(0,14,1,0); SidePatch.ZIndex=3; SidePatch.Parent=Side
+-- ── SIDEBAR ──────────────────────────────────────────────────────────────
+local Side=Instance.new("Frame"); Side.BackgroundColor3=C.side; Side.BorderSizePixel=0; Side.Size=UDim2.new(0,SB_W,1,0); Side.ZIndex=2; Side.ClipsDescendants=true; Side.Parent=Win; Corn(Side,16)
+local SPatch=Instance.new("Frame"); SPatch.BackgroundColor3=C.side; SPatch.BorderSizePixel=0; SPatch.Position=UDim2.new(1,-16,0,0); SPatch.Size=UDim2.new(0,16,1,0); SPatch.ZIndex=3; SPatch.Parent=Side
 
--- Logo top
-local SLogo=Instance.new("TextLabel"); SLogo.BackgroundTransparency=1; SLogo.AnchorPoint=Vector2.new(0.5,0); SLogo.Position=UDim2.new(0.5,0,0,10); SLogo.Size=UDim2.new(1,0,0,34); SLogo.ZIndex=4; SLogo.Font=Enum.Font.GothamBold; SLogo.Text="🌸"; SLogo.TextSize=20; SLogo.TextColor3=Color3.new(1,1,1); SLogo.TextXAlignment=Enum.TextXAlignment.Center; SLogo.Parent=Side
+local SLogo=Instance.new("TextLabel"); SLogo.BackgroundTransparency=1; SLogo.AnchorPoint=Vector2.new(0.5,0); SLogo.Position=UDim2.new(0.5,0,0,10); SLogo.Size=UDim2.new(1,0,0,34); SLogo.ZIndex=4; SLogo.Font=Enum.Font.GothamBold; SLogo.Text="🌸"; SLogo.TextSize=22; SLogo.TextColor3=Color3.new(1,1,1); SLogo.TextXAlignment=Enum.TextXAlignment.Center; SLogo.Parent=Side
+local SLogoSep=Instance.new("Frame"); SLogoSep.BackgroundColor3=C.border; SLogoSep.BorderSizePixel=0; SLogoSep.Position=UDim2.new(0,7,0,50); SLogoSep.Size=UDim2.new(1,-14,0,1); SLogoSep.ZIndex=4; SLogoSep.Parent=Side
 
--- Logo separator
-local SLogoSep=Instance.new("Frame"); SLogoSep.BackgroundColor3=C.border; SLogoSep.BorderSizePixel=0; SLogoSep.Position=UDim2.new(0,8,0,48); SLogoSep.Size=UDim2.new(1,-16,0,1); SLogoSep.ZIndex=4; SLogoSep.Parent=Side
+local NavCont=Instance.new("ScrollingFrame"); NavCont.BackgroundTransparency=1; NavCont.BorderSizePixel=0; NavCont.Position=UDim2.new(0,0,0,56); NavCont.Size=UDim2.new(1,0,1,-96); NavCont.CanvasSize=UDim2.new(0,0,0,0); NavCont.AutomaticCanvasSize=Enum.AutomaticSize.Y; NavCont.ScrollBarThickness=0; NavCont.ZIndex=3; NavCont.Parent=Side; ListL(NavCont,Enum.FillDirection.Vertical,4); Pad(NavCont,5,5,5,5)
 
--- Nav scroll container (so extra tabs fit)
-local NavCont=Instance.new("ScrollingFrame"); NavCont.BackgroundTransparency=1; NavCont.BorderSizePixel=0; NavCont.Position=UDim2.new(0,0,0,56); NavCont.Size=UDim2.new(1,0,1,-100); NavCont.CanvasSize=UDim2.new(0,0,0,0); NavCont.AutomaticCanvasSize=Enum.AutomaticSize.Y; NavCont.ScrollBarThickness=0; NavCont.ZIndex=3; NavCont.Parent=Side; ListL(NavCont,Enum.FillDirection.Vertical,4); Pad(NavCont,6,6,5,5)
-
--- User avatar at bottom of sidebar
-local SBotSep=Instance.new("Frame"); SBotSep.BackgroundColor3=C.border; SBotSep.BorderSizePixel=0; SBotSep.AnchorPoint=Vector2.new(0,1); SBotSep.Position=UDim2.new(0,8,1,-44); SBotSep.Size=UDim2.new(1,-16,0,1); SBotSep.ZIndex=4; SBotSep.Parent=Side
-local SAv=Instance.new("Frame"); SAv.BackgroundColor3=Color3.fromRGB(35,50,90); SAv.BorderSizePixel=0; SAv.AnchorPoint=Vector2.new(0.5,1); SAv.Position=UDim2.new(0.5,0,1,-8); SAv.Size=UDim2.new(0,30,0,30); SAv.ZIndex=4; SAv.Parent=Side; Corn(SAv,99)
+local SBotSep=Instance.new("Frame"); SBotSep.BackgroundColor3=C.border; SBotSep.BorderSizePixel=0; SBotSep.AnchorPoint=Vector2.new(0,1); SBotSep.Position=UDim2.new(0,7,1,-46); SBotSep.Size=UDim2.new(1,-14,0,1); SBotSep.ZIndex=4; SBotSep.Parent=Side
+local SAv=Instance.new("Frame"); SAv.BackgroundColor3=Color3.fromRGB(30,46,88); SAv.BorderSizePixel=0; SAv.AnchorPoint=Vector2.new(0.5,1); SAv.Position=UDim2.new(0.5,0,1,-9); SAv.Size=UDim2.new(0,30,0,30); SAv.ZIndex=4; SAv.Parent=Side; Corn(SAv,99)
 local SAvi=Instance.new("TextLabel"); SAvi.BackgroundTransparency=1; SAvi.Size=UDim2.new(1,0,1,0); SAvi.ZIndex=5; SAvi.Font=Enum.Font.Gotham; SAvi.Text="👤"; SAvi.TextSize=14; SAvi.TextColor3=Color3.new(1,1,1); SAvi.Parent=SAv
 pcall(function() local img=Players:GetUserThumbnailAsync(LP.UserId,Enum.ThumbnailType.HeadShot,Enum.ThumbnailSize.Size48x48); if img then SAvi.Text=""; local il=Instance.new("ImageLabel"); il.BackgroundTransparency=1; il.Size=UDim2.new(1,0,1,0); il.ZIndex=5; il.Image=img; il.Parent=SAv; Corn(il,99) end end)
 
--- Vertical separator between sidebar and content
+-- Vertical separator
 local SVLine=Instance.new("Frame"); SVLine.BackgroundColor3=C.border; SVLine.BorderSizePixel=0; SVLine.Position=UDim2.new(0,SB_W,0,0); SVLine.Size=UDim2.new(0,1,1,0); SVLine.ZIndex=3; SVLine.Parent=Win
 
--- ── TOPBAR ──────────────────────────────────────────────────────────────
+-- ── TOPBAR ────────────────────────────────────────────────────────────────
 local TopBar=Instance.new("Frame"); TopBar.BackgroundColor3=C.topbar; TopBar.BorderSizePixel=0; TopBar.Position=UDim2.new(0,SB_W+1,0,0); TopBar.Size=UDim2.new(1,-SB_W-1,0,TOP_H); TopBar.ZIndex=2; TopBar.Parent=Win
 
--- Discord link center of topbar (clickable)
-local DiscURL=Instance.new("TextButton"); DiscURL.BackgroundTransparency=1; DiscURL.BorderSizePixel=0; DiscURL.AnchorPoint=Vector2.new(0.5,0.5); DiscURL.Position=UDim2.new(0.5,0,0.5,0); DiscURL.Size=UDim2.new(0.55,0,1,0); DiscURL.ZIndex=4; DiscURL.Font=Enum.Font.Gotham; DiscURL.Text="discord.gg/JGeVGv23TQ"; DiscURL.TextColor3=C.tDim; DiscURL.TextSize=11; DiscURL.Parent=TopBar
+local DiscURL=Instance.new("TextButton"); DiscURL.BackgroundTransparency=1; DiscURL.BorderSizePixel=0; DiscURL.AnchorPoint=Vector2.new(0.5,0.5); DiscURL.Position=UDim2.new(0.5,0,0.5,0); DiscURL.Size=UDim2.new(0.52,0,1,0); DiscURL.ZIndex=4; DiscURL.Font=Enum.Font.Gotham; DiscURL.Text="discord.gg/JGeVGv23TQ"; DiscURL.TextColor3=C.tDim; DiscURL.TextSize=11; DiscURL.Parent=TopBar
 DiscURL.MouseEnter:Connect(function() Tw(DiscURL,0.1,{TextColor3=C.tSec}) end); DiscURL.MouseLeave:Connect(function() Tw(DiscURL,0.1,{TextColor3=C.tDim}) end)
 DiscURL.MouseButton1Click:Connect(function() CopyClip("https://discord.gg/JGeVGv23TQ"); DiscURL.TextColor3=C.ok; task.delay(1.5,function() Tw(DiscURL,0.3,{TextColor3=C.tDim}) end) end)
 
--- Close X
-local CloseX=Instance.new("TextButton"); CloseX.BackgroundColor3=Color3.fromRGB(185,48,48); CloseX.BorderSizePixel=0; CloseX.AnchorPoint=Vector2.new(1,0.5); CloseX.Position=UDim2.new(1,-10,0.5,0); CloseX.Size=UDim2.new(0,22,0,22); CloseX.ZIndex=6; CloseX.Font=Enum.Font.GothamBold; CloseX.Text="✕"; CloseX.TextColor3=Color3.new(1,1,1); CloseX.TextSize=11; CloseX.Parent=TopBar; Corn(CloseX,99)
+local CloseX=Instance.new("TextButton"); CloseX.BackgroundColor3=Color3.fromRGB(185,48,48); CloseX.BorderSizePixel=0; CloseX.AnchorPoint=Vector2.new(1,0.5); CloseX.Position=UDim2.new(1,-10,0.5,0); CloseX.Size=UDim2.new(0,24,0,24); CloseX.ZIndex=6; CloseX.Font=Enum.Font.GothamBold; CloseX.Text="✕"; CloseX.TextColor3=Color3.new(1,1,1); CloseX.TextSize=12; CloseX.Parent=TopBar; Corn(CloseX,99)
 CloseX.MouseEnter:Connect(function() Tw(CloseX,0.08,{BackgroundColor3=Color3.fromRGB(220,65,65)}) end); CloseX.MouseLeave:Connect(function() Tw(CloseX,0.08,{BackgroundColor3=Color3.fromRGB(185,48,48)}) end)
 
--- Topbar separator line
 local TBLine=Instance.new("Frame"); TBLine.BackgroundColor3=C.border; TBLine.BorderSizePixel=0; TBLine.Position=UDim2.new(0,SB_W+1,0,TOP_H); TBLine.Size=UDim2.new(1,-SB_W-1,0,1); TBLine.ZIndex=3; TBLine.Parent=Win
 
--- ── CONTENT AREA ────────────────────────────────────────────────────────
-local Content=Instance.new("Frame"); Content.BackgroundTransparency=1; Content.BorderSizePixel=0
-Content.Position=UDim2.new(0,SB_W+1,0,TOP_H+1); Content.Size=UDim2.new(1,-SB_W-1,1,-TOP_H-1)
-Content.ZIndex=2; Content.ClipsDescendants=true; Content.Parent=Win
+-- ── CONTENT AREA ──────────────────────────────────────────────────────────
+local Content=Instance.new("Frame"); Content.BackgroundTransparency=1; Content.BorderSizePixel=0; Content.Position=UDim2.new(0,SB_W+1,0,TOP_H+1); Content.Size=UDim2.new(1,-SB_W-1,1,-TOP_H-1); Content.ZIndex=2; Content.ClipsDescendants=true; Content.Parent=Win
 
--- ── PAGE FACTORY ────────────────────────────────────────────────────────
-local function MakePage(icon, name, order)
-    -- Sidebar button (icon-only, 38x38 rounded)
+-- ── PAGE FACTORY ─────────────────────────────────────────────────────────
+local function MakePage(icon,name,order)
     local BtnOuter=Instance.new("Frame"); BtnOuter.BackgroundTransparency=1; BtnOuter.BorderSizePixel=0; BtnOuter.Size=UDim2.new(1,0,0,38); BtnOuter.LayoutOrder=order; BtnOuter.Parent=NavCont
-    local Btn=Instance.new("Frame"); Btn.BackgroundColor3=Color3.fromRGB(0,0,0); Btn.BackgroundTransparency=1; Btn.BorderSizePixel=0; Btn.AnchorPoint=Vector2.new(0.5,0.5); Btn.Position=UDim2.new(0.5,0,0.5,0); Btn.Size=UDim2.new(1,0,1,0); Btn.ZIndex=4; Btn.Parent=BtnOuter; Corn(Btn,10)
-
-    -- Active left indicator bar
-    local ActBar=Instance.new("Frame"); ActBar.BackgroundColor3=C.navActI; ActBar.BorderSizePixel=0; ActBar.Position=UDim2.new(0,-5,0.2,0); ActBar.Size=UDim2.new(0,3,0.6,0); ActBar.ZIndex=5; ActBar.Visible=false; ActBar.Parent=Btn; Corn(ActBar,99)
-
-    -- Icon label
+    local Btn=Instance.new("Frame"); Btn.BackgroundColor3=Color3.new(0,0,0); Btn.BackgroundTransparency=1; Btn.BorderSizePixel=0; Btn.AnchorPoint=Vector2.new(0.5,0.5); Btn.Position=UDim2.new(0.5,0,0.5,0); Btn.Size=UDim2.new(1,0,1,0); Btn.ZIndex=4; Btn.Parent=BtnOuter; Corn(Btn,10)
+    local ActBar=Instance.new("Frame"); ActBar.BackgroundColor3=C.navActI; ActBar.BorderSizePixel=0; ActBar.Position=UDim2.new(0,-4,0.2,0); ActBar.Size=UDim2.new(0,3,0.6,0); ActBar.ZIndex=5; ActBar.Visible=false; ActBar.Parent=Btn; Corn(ActBar,99)
     local Ico=Instance.new("TextLabel"); Ico.BackgroundTransparency=1; Ico.AnchorPoint=Vector2.new(0.5,0.5); Ico.Position=UDim2.new(0.5,0,0.5,0); Ico.Size=UDim2.new(0,22,0,22); Ico.ZIndex=5; Ico.Font=Enum.Font.GothamBold; Ico.Text=icon; Ico.TextSize=15; Ico.TextColor3=C.navIco; Ico.TextXAlignment=Enum.TextXAlignment.Center; Ico.Parent=Btn
-
-    -- Tooltip on hover
-    local Tip=Instance.new("TextLabel"); Tip.BackgroundColor3=C.cell; Tip.BorderSizePixel=0; Tip.AnchorPoint=Vector2.new(0,0.5); Tip.Position=UDim2.new(1,8,0.5,0); Tip.Size=UDim2.new(0,0,0,22); Tip.AutomaticSize=Enum.AutomaticSize.X; Tip.ZIndex=20; Tip.Font=Enum.Font.GothamSemibold; Tip.Text="  "..name.."  "; Tip.TextColor3=C.tPri; Tip.TextSize=11; Tip.Visible=false; Tip.Parent=Btn; Corn(Tip,6); Strk(Tip,C.border,1)
-
-    -- Page scrollframe
+    local Tip=Instance.new("TextLabel"); Tip.BackgroundColor3=C.cell; Tip.BorderSizePixel=0; Tip.AnchorPoint=Vector2.new(0,0.5); Tip.Position=UDim2.new(1,6,0.5,0); Tip.Size=UDim2.new(0,0,0,22); Tip.AutomaticSize=Enum.AutomaticSize.X; Tip.ZIndex=20; Tip.Font=Enum.Font.GothamSemibold; Tip.Text="  "..name.."  "; Tip.TextColor3=C.tPri; Tip.TextSize=11; Tip.Visible=false; Tip.Parent=Btn; Corn(Tip,6); Strk(Tip,C.border,1)
     local Page=Instance.new("ScrollingFrame"); Page.BackgroundTransparency=1; Page.BorderSizePixel=0; Page.Size=UDim2.new(1,0,1,0); Page.CanvasSize=UDim2.new(0,0,0,0); Page.AutomaticCanvasSize=Enum.AutomaticSize.Y; Page.ScrollBarThickness=3; Page.ScrollBarImageColor3=C.togOn; Page.Visible=false; Page.ZIndex=3; Page.Parent=Content; ListL(Page,Enum.FillDirection.Vertical,0)
-
-    local entry={page=Page,btn=Btn,ico=Ico,bar=ActBar,tip=Tip,active=false}
-    table.insert(PagesList,entry)
-
-    -- Click trigger (invisible button over icon area)
-    local ClickBtn=Instance.new("TextButton"); ClickBtn.BackgroundTransparency=1; ClickBtn.BorderSizePixel=0; ClickBtn.Size=UDim2.new(1,0,1,0); ClickBtn.ZIndex=10; ClickBtn.Text=""; ClickBtn.Font=Enum.Font.Gotham; ClickBtn.TextSize=1; ClickBtn.Parent=Btn
-    ClickBtn.MouseEnter:Connect(function() Tip.Visible=true end); ClickBtn.MouseLeave:Connect(function() Tip.Visible=false end)
-    ClickBtn.MouseButton1Click:Connect(function()
+    local entry={page=Page,btn=Btn,ico=Ico,bar=ActBar,tip=Tip,active=false}; table.insert(PagesList,entry)
+    local CB=Instance.new("TextButton"); CB.BackgroundTransparency=1; CB.BorderSizePixel=0; CB.Size=UDim2.new(1,0,1,0); CB.ZIndex=10; CB.Text=""; CB.Font=Enum.Font.Gotham; CB.TextSize=1; CB.Parent=Btn
+    CB.MouseEnter:Connect(function() Tip.Visible=true end); CB.MouseLeave:Connect(function() Tip.Visible=false end)
+    CB.MouseButton1Click:Connect(function()
         Tip.Visible=false
-        for _,e in ipairs(PagesList) do
-            e.page.Visible=false; e.active=false; e.bar.Visible=false
-            Tw(e.btn,0.14,{BackgroundTransparency=1}); Tw(e.ico,0.14,{TextColor3=C.navIco})
-        end
-        Page.Visible=true; entry.active=true; entry.bar.Visible=true
-        Tw(Btn,0.14,{BackgroundTransparency=0,BackgroundColor3=C.navAct}); Tw(Ico,0.14,{TextColor3=C.navActI})
-        ActivePage=entry
+        for _,e in ipairs(PagesList) do e.page.Visible=false; e.active=false; e.bar.Visible=false; Tw(e.btn,0.14,{BackgroundTransparency=1}); Tw(e.ico,0.14,{TextColor3=C.navIco}) end
+        Page.Visible=true; entry.active=true; entry.bar.Visible=true; Tw(Btn,0.14,{BackgroundTransparency=0,BackgroundColor3=C.navAct}); Tw(Ico,0.14,{TextColor3=C.navActI}); ActivePage=entry
     end)
     return Page
 end
 
--- ── CREATE PAGES ──────────────────────────────────────────────────────────
 local DashPage  = MakePage("⊞","Dashboard",  1)
 local PlayPage  = MakePage("👥","Players",   2)
 local VisuPage  = MakePage("👁","Visuals",   3)
@@ -388,434 +528,482 @@ local HubPage   = MakePage("📦","Script Hubs",IS_NDS and 5 or 4)
 local NDSHubPage= MakePage("🌋","NDS Hub",    IS_NDS and 6 or 5)
 local MiscPage  = MakePage("⚙","Misc",       IS_NDS and 7 or 6)
 
--- ── DRAG (topbar) ─────────────────────────────────────────────────────────
+-- Drag
 local wDrag,wStart,wSPos=false,nil,nil
 TopBar.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then wDrag=true; wStart=i.Position; wSPos=Win.Position end end)
 UIS.InputChanged:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseMovement and wDrag then local d=i.Position-wStart; Win.Position=UDim2.new(wSPos.X.Scale,wSPos.X.Offset+d.X,wSPos.Y.Scale,wSPos.Y.Offset+d.Y) end end)
 UIS.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then wDrag=false end end)
 
--- ══════════════════════════════════════════════════════════════════════════
---   COMPONENT BUILDERS  (Sirius style)
--- ══════════════════════════════════════════════════════════════════════════
-local PD=12  -- page padding
+-- ── SHARED COMPONENT BUILDERS ────────────────────────────────────────────
+local PD=13
 
--- Section header
-local function SecHdr(parent,txt,order)
-    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,26); F.LayoutOrder=order; F.Parent=parent; Pad(F,0,0,PD,PD)
-    local L=Instance.new("TextLabel"); L.BackgroundTransparency=1; L.Size=UDim2.new(1,0,1,0); L.ZIndex=5; L.Font=Enum.Font.GothamMedium; L.Text=txt:upper(); L.TextColor3=C.tDim; L.TextSize=9; L.TextXAlignment=Enum.TextXAlignment.Left; L.Parent=F
+local function SecHdr(p,t,o)
+    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,28); F.LayoutOrder=o; F.Parent=p; Pad(F,2,0,PD,PD)
+    local L=Instance.new("TextLabel"); L.BackgroundTransparency=1; L.Size=UDim2.new(1,0,1,0); L.ZIndex=5; L.Font=Enum.Font.GothamBold; L.Text=t:upper(); L.TextColor3=C.tDim; L.TextSize=9; L.TextXAlignment=Enum.TextXAlignment.Left; L.Parent=F
 end
 
--- Toggle row (Sirius style: full-width with bottom separator)
-local function TogRow(parent,lbl,order,cb)
-    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,44); F.LayoutOrder=order; F.Parent=parent; Pad(F,0,0,PD,PD)
+local function TogRow(p,l,o,cb)
+    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,44); F.LayoutOrder=o; F.Parent=p; Pad(F,0,0,PD,PD)
     local sep=Instance.new("Frame"); sep.BackgroundColor3=C.sep; sep.BorderSizePixel=0; sep.AnchorPoint=Vector2.new(0,1); sep.Position=UDim2.new(0,0,1,0); sep.Size=UDim2.new(1,0,0,1); sep.ZIndex=4; sep.Parent=F
-    local Lbl=Instance.new("TextLabel"); Lbl.BackgroundTransparency=1; Lbl.Position=UDim2.new(0,0,0,0); Lbl.Size=UDim2.new(1,-56,1,0); Lbl.ZIndex=5; Lbl.Font=Enum.Font.GothamMedium; Lbl.Text=lbl; Lbl.TextColor3=C.tPri; Lbl.TextSize=13; Lbl.TextXAlignment=Enum.TextXAlignment.Left; Lbl.TextWrapped=true; Lbl.Parent=F
+    local Lbl=Instance.new("TextLabel"); Lbl.BackgroundTransparency=1; Lbl.Position=UDim2.new(0,0,0,0); Lbl.Size=UDim2.new(1,-56,1,0); Lbl.ZIndex=5; Lbl.Font=Enum.Font.GothamMedium; Lbl.Text=l; Lbl.TextColor3=C.tPri; Lbl.TextSize=13; Lbl.TextXAlignment=Enum.TextXAlignment.Left; Lbl.TextWrapped=true; Lbl.Parent=F
     local Bg=Instance.new("Frame"); Bg.AnchorPoint=Vector2.new(1,0.5); Bg.BackgroundColor3=C.togOff; Bg.BorderSizePixel=0; Bg.Position=UDim2.new(1,0,0.5,0); Bg.Size=UDim2.new(0,44,0,24); Bg.ZIndex=5; Bg.Parent=F; Corn(Bg,99)
     local Knob=Instance.new("Frame"); Knob.AnchorPoint=Vector2.new(0,0.5); Knob.BackgroundColor3=C.knob; Knob.BorderSizePixel=0; Knob.Position=UDim2.new(0,3,0.5,0); Knob.Size=UDim2.new(0,18,0,18); Knob.ZIndex=6; Knob.Parent=Bg; Corn(Knob,99)
-    local Catch=Instance.new("TextButton"); Catch.BackgroundTransparency=1; Catch.BorderSizePixel=0; Catch.Size=UDim2.new(1,0,1,0); Catch.ZIndex=10; Catch.Text=""; Catch.Font=Enum.Font.Gotham; Catch.TextSize=1; Catch.Parent=F
+    local Ca=Instance.new("TextButton"); Ca.BackgroundTransparency=1; Ca.BorderSizePixel=0; Ca.Size=UDim2.new(1,0,1,0); Ca.ZIndex=10; Ca.Text=""; Ca.Font=Enum.Font.Gotham; Ca.TextSize=1; Ca.Parent=F
     local on=false
     local function Set(s) on=s; if s then Tw(Bg,0.15,{BackgroundColor3=C.togOn}); Tw(Knob,0.15,{Position=UDim2.new(1,-21,0.5,0)}) else Tw(Bg,0.15,{BackgroundColor3=C.togOff}); Tw(Knob,0.15,{Position=UDim2.new(0,3,0.5,0)}) end; if cb then task.spawn(pcall,cb,s) end end
-    Catch.MouseButton1Click:Connect(function() Set(not on) end)
-    return {Set=Set,Get=function() return on end}
+    Ca.MouseButton1Click:Connect(function() Set(not on) end); return {Set=Set,Get=function() return on end}
 end
 
--- Action button
-local function ActBtn(parent,lbl,col,order,cb)
+local function ActBtn(p,l,col,o,cb)
     col=col or C.togOn
-    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,40); F.LayoutOrder=order; F.Parent=parent; Pad(F,4,4,PD,PD)
-    local B=Instance.new("TextButton"); B.BackgroundColor3=col; B.BorderSizePixel=0; B.Size=UDim2.new(1,0,1,0); B.ZIndex=5; B.Font=Enum.Font.GothamSemibold; B.Text=lbl; B.TextColor3=C.tPri; B.TextSize=12; B.TextWrapped=true; B.Parent=F; Corn(B,8)
+    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,40); F.LayoutOrder=o; F.Parent=p; Pad(F,4,4,PD,PD)
+    local B=Instance.new("TextButton"); B.BackgroundColor3=col; B.BorderSizePixel=0; B.Size=UDim2.new(1,0,1,0); B.ZIndex=5; B.Font=Enum.Font.GothamSemibold; B.Text=l; B.TextColor3=C.tPri; B.TextSize=12; B.TextWrapped=true; B.Parent=F; Corn(B,9)
     local lit=col:Lerp(Color3.new(1,1,1),0.14); local drk=col:Lerp(Color3.new(0,0,0),0.2)
     B.MouseEnter:Connect(function() Tw(B,0.1,{BackgroundColor3=lit}) end); B.MouseLeave:Connect(function() Tw(B,0.1,{BackgroundColor3=col}) end)
     B.MouseButton1Down:Connect(function() Tw(B,0.05,{BackgroundColor3=drk}) end); B.MouseButton1Up:Connect(function() Tw(B,0.05,{BackgroundColor3=lit}) end)
     if cb then B.MouseButton1Click:Connect(cb) end; return B
 end
 
--- Text input row
-local function InpRow(parent,ph,order)
-    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,40); F.LayoutOrder=order; F.Parent=parent; Pad(F,4,4,PD,PD)
-    local Box=Instance.new("Frame"); Box.BackgroundColor3=C.cell; Box.BorderSizePixel=0; Box.Size=UDim2.new(1,0,1,0); Box.ZIndex=5; Box.Parent=F; Corn(Box,8); local sk=Strk(Box,C.border,1)
-    local TB=Instance.new("TextBox"); TB.BackgroundTransparency=1; TB.Position=UDim2.new(0,10,0,0); TB.Size=UDim2.new(1,-20,1,0); TB.ZIndex=6; TB.Font=Enum.Font.Gotham; TB.PlaceholderText=ph or "..."; TB.PlaceholderColor3=C.tDim; TB.Text=""; TB.TextColor3=C.tPri; TB.TextSize=12; TB.TextXAlignment=Enum.TextXAlignment.Left; TB.ClearTextOnFocus=false; TB.Parent=Box
-    TB.Focused:Connect(function() Tw(sk,0.12,{Color=C.togOn}) end); TB.FocusLost:Connect(function() Tw(sk,0.12,{Color=C.border}) end)
+local function InpRow(p,ph,o)
+    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,40); F.LayoutOrder=o; F.Parent=p; Pad(F,4,4,PD,PD)
+    local Box=Instance.new("Frame"); Box.BackgroundColor3=C.cell; Box.BorderSizePixel=0; Box.Size=UDim2.new(1,0,1,0); Box.ZIndex=5; Box.Parent=F; Corn(Box,9); local sk=Strk(Box,C.border,1)
+    local TB=Instance.new("TextBox"); TB.BackgroundTransparency=1; TB.Position=UDim2.new(0,11,0,0); TB.Size=UDim2.new(1,-22,1,0); TB.ZIndex=6; TB.Font=Enum.Font.Gotham; TB.PlaceholderText=ph or "..."; TB.PlaceholderColor3=C.tDim; TB.Text=""; TB.TextColor3=C.tPri; TB.TextSize=12; TB.TextXAlignment=Enum.TextXAlignment.Left; TB.ClearTextOnFocus=false; TB.Parent=Box
+    TB.Focused:Connect(function() Tw(sk,0.12,{Color=C.togOn}) end); TB.FocusLost:Connect(function() Tw(sk,0.12,{Color=C.border}) end); return TB
+end
+
+local function InfoLbl(p,t,col,o)
+    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,22); F.LayoutOrder=o; F.Parent=p; Pad(F,0,0,PD,PD)
+    local L=Instance.new("TextLabel"); L.BackgroundTransparency=1; L.Size=UDim2.new(1,0,1,0); L.ZIndex=5; L.Font=Enum.Font.Gotham; L.Text=t; L.TextColor3=col or C.tSec; L.TextSize=11; L.TextXAlignment=Enum.TextXAlignment.Left; L.TextWrapped=true; L.Parent=F; return L
+end
+
+local function SpeedRow(p,l,o,isJ)
+    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,42); F.LayoutOrder=o; F.Parent=p; Pad(F,4,4,PD,PD); ListL(F,Enum.FillDirection.Horizontal,5)
+    local LL=Instance.new("TextLabel"); LL.BackgroundTransparency=1; LL.Size=UDim2.new(0,65,1,0); LL.ZIndex=5; LL.Font=Enum.Font.GothamMedium; LL.Text=l; LL.TextColor3=C.tSec; LL.TextSize=11; LL.TextXAlignment=Enum.TextXAlignment.Left; LL.Parent=F
+    local TBW=Instance.new("Frame"); TBW.BackgroundColor3=C.cell; TBW.BorderSizePixel=0; TBW.Size=UDim2.new(1,-170,1,0); TBW.ZIndex=5; TBW.Parent=F; Corn(TBW,7); local tbsk=Strk(TBW,C.border,1)
+    local TB=Instance.new("TextBox"); TB.BackgroundTransparency=1; TB.Position=UDim2.new(0,8,0,0); TB.Size=UDim2.new(1,-16,1,0); TB.ZIndex=6; TB.Font=Enum.Font.GothamSemibold; TB.Text=isJ and tostring(S.jmp) or tostring(S.spd); TB.TextColor3=C.tPri; TB.TextSize=12; TB.TextXAlignment=Enum.TextXAlignment.Center; TB.ClearTextOnFocus=false; TB.Parent=TBW
+    TB.Focused:Connect(function() Tw(tbsk,0.12,{Color=C.togOn}) end)
+    TB.FocusLost:Connect(function() Tw(tbsk,0.12,{Color=C.border}); local n=tonumber(TB.Text); if n then n=math.clamp(n,0,1000); if isJ then S.jmp=n; local h=GetHum(LP); if h then h.JumpPower=n end else S.spd=n; local h=GetHum(LP); if h then h.WalkSpeed=n end end; TB.Text=tostring(n) else TB.Text=isJ and tostring(S.jmp) or tostring(S.spd) end end)
+    local function MB(t2,c2,fn) local B=Instance.new("TextButton"); B.BackgroundColor3=c2; B.BorderSizePixel=0; B.Size=UDim2.new(0,40,1,0); B.ZIndex=5; B.Font=Enum.Font.GothamBold; B.Text=t2; B.TextColor3=C.tPri; B.TextSize=15; B.Parent=F; Corn(B,7); B.MouseButton1Click:Connect(fn) end
+    MB("+",Color3.fromRGB(30,74,155),function() local d=isJ and 25 or 10; if isJ then S.jmp=math.clamp(S.jmp+d,0,1000) else S.spd=math.clamp(S.spd+d,0,1000) end; local h=GetHum(LP); if h then if isJ then h.JumpPower=S.jmp else h.WalkSpeed=S.spd end end; TB.Text=isJ and tostring(S.jmp) or tostring(S.spd) end)
+    MB("−",Color3.fromRGB(42,38,60),function() local d=isJ and 25 or 10; if isJ then S.jmp=math.clamp(S.jmp-d,0,1000) else S.spd=math.clamp(S.spd-d,2,1000) end; local h=GetHum(LP); if h then if isJ then h.JumpPower=S.jmp else h.WalkSpeed=S.spd end end; TB.Text=isJ and tostring(S.jmp) or tostring(S.spd) end)
+    local BR=Instance.new("TextButton"); BR.BackgroundColor3=Color3.fromRGB(30,30,44); BR.BorderSizePixel=0; BR.Size=UDim2.new(0,40,1,0); BR.ZIndex=5; BR.Font=Enum.Font.GothamSemibold; BR.Text="↺"; BR.TextColor3=C.tDim; BR.TextSize=14; BR.Parent=F; Corn(BR,7); BR.MouseButton1Click:Connect(function() if isJ then S.jmp=50; local h=GetHum(LP); if h then h.JumpPower=50 end; TB.Text="50" else S.spd=16; local h=GetHum(LP); if h then h.WalkSpeed=16 end; TB.Text="16" end end)
     return TB
 end
 
--- Info label
-local function InfoLbl(parent,txt,col,order)
-    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,22); F.LayoutOrder=order; F.Parent=parent; Pad(F,0,0,PD,PD)
-    local L=Instance.new("TextLabel"); L.BackgroundTransparency=1; L.Size=UDim2.new(1,0,1,0); L.ZIndex=5; L.Font=Enum.Font.Gotham; L.Text=txt; L.TextColor3=col or C.tSec; L.TextSize=11; L.TextXAlignment=Enum.TextXAlignment.Left; L.TextWrapped=true; L.Parent=F; return L
-end
-
--- Speed/Jump row with textbox
-local function SpeedJumpRow(parent,lbl,order,isJump)
-    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,42); F.LayoutOrder=order; F.Parent=parent; Pad(F,4,4,PD,PD); ListL(F,Enum.FillDirection.Horizontal,5)
-    local LL=Instance.new("TextLabel"); LL.BackgroundTransparency=1; LL.Size=UDim2.new(0,68,1,0); LL.ZIndex=5; LL.Font=Enum.Font.GothamMedium; LL.Text=lbl; LL.TextColor3=C.tSec; LL.TextSize=11; LL.TextXAlignment=Enum.TextXAlignment.Left; LL.Parent=F
-    local TBW=Instance.new("Frame"); TBW.BackgroundColor3=C.cell; TBW.BorderSizePixel=0; TBW.Size=UDim2.new(1,-172,1,0); TBW.ZIndex=5; TBW.Parent=F; Corn(TBW,7); local tbsk=Strk(TBW,C.border,1)
-    local TB=Instance.new("TextBox"); TB.BackgroundTransparency=1; TB.Position=UDim2.new(0,8,0,0); TB.Size=UDim2.new(1,-16,1,0); TB.ZIndex=6; TB.Font=Enum.Font.GothamSemibold; TB.Text=isJump and tostring(S.jmp) or tostring(S.spd); TB.TextColor3=C.tPri; TB.TextSize=12; TB.TextXAlignment=Enum.TextXAlignment.Center; TB.ClearTextOnFocus=false; TB.Parent=TBW
-    TB.Focused:Connect(function() Tw(tbsk,0.12,{Color=C.togOn}) end)
-    TB.FocusLost:Connect(function() Tw(tbsk,0.12,{Color=C.border}); local n=tonumber(TB.Text); if n then n=math.clamp(n,0,1000); if isJump then S.jmp=n; local h=GetHum(LP); if h then h.JumpPower=n end else S.spd=n; local h=GetHum(LP); if h then h.WalkSpeed=n end end; TB.Text=tostring(n) else TB.Text=isJump and tostring(S.jmp) or tostring(S.spd) end end)
-    local function MkB(txt,c2,fn) local B=Instance.new("TextButton"); B.BackgroundColor3=c2; B.BorderSizePixel=0; B.Size=UDim2.new(0,40,1,0); B.ZIndex=5; B.Font=Enum.Font.GothamBold; B.Text=txt; B.TextColor3=C.tPri; B.TextSize=15; B.Parent=F; Corn(B,7); B.MouseButton1Click:Connect(fn) end
-    MkB("+",Color3.fromRGB(32,76,158),function() local d=isJump and 25 or 10; if isJump then S.jmp=math.clamp(S.jmp+d,0,1000) else S.spd=math.clamp(S.spd+d,0,1000) end; local h=GetHum(LP); if h then if isJump then h.JumpPower=S.jmp else h.WalkSpeed=S.spd end end; TB.Text=isJump and tostring(S.jmp) or tostring(S.spd) end)
-    MkB("−",Color3.fromRGB(44,40,62),function() local d=isJump and 25 or 10; if isJump then S.jmp=math.clamp(S.jmp-d,0,1000) else S.spd=math.clamp(S.spd-d,2,1000) end; local h=GetHum(LP); if h then if isJump then h.JumpPower=S.jmp else h.WalkSpeed=S.spd end end; TB.Text=isJump and tostring(S.jmp) or tostring(S.spd) end)
-    local BR=Instance.new("TextButton"); BR.BackgroundColor3=Color3.fromRGB(32,32,42); BR.BorderSizePixel=0; BR.Size=UDim2.new(0,42,1,0); BR.ZIndex=5; BR.Font=Enum.Font.GothamSemibold; BR.Text="↺"; BR.TextColor3=C.tDim; BR.TextSize=14; BR.Parent=F; Corn(BR,7); BR.MouseButton1Click:Connect(function() if isJump then S.jmp=50; local h=GetHum(LP); if h then h.JumpPower=50 end; TB.Text="50" else S.spd=16; local h=GetHum(LP); if h then h.WalkSpeed=16 end; TB.Text="16" end end)
-end
-
--- Hub card (large icon card + execute button)
-local function HubCard(parent,icon,title,desc,col,order,url)
+local function HubCard(p,icon,title,desc,col,o,url)
     col=col or C.togOn
-    local F=Instance.new("Frame"); F.BackgroundColor3=C.card; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,90); F.LayoutOrder=order; F.Parent=parent; Corn(F,12); Strk(F,C.border,1); Pad(F,0,0,PD,PD)
-    local IC=Instance.new("Frame"); IC.BackgroundColor3=col; IC.BorderSizePixel=0; IC.AnchorPoint=Vector2.new(0,0.5); IC.Position=UDim2.new(0,0,0.5,0); IC.Size=UDim2.new(0,46,0,46); IC.ZIndex=5; IC.Parent=F; Corn(IC,12)
-    local IL=Instance.new("TextLabel"); IL.BackgroundTransparency=1; IL.Size=UDim2.new(1,0,1,0); IL.ZIndex=6; IL.Font=Enum.Font.GothamBold; IL.Text=icon; IL.TextSize=22; IL.TextColor3=Color3.new(1,1,1); IL.Parent=IC
-    local TL=Instance.new("TextLabel"); TL.BackgroundTransparency=1; TL.Position=UDim2.new(0,56,0,12); TL.Size=UDim2.new(1,-164,0,20); TL.ZIndex=5; TL.Font=Enum.Font.GothamBold; TL.Text=title; TL.TextColor3=C.tPri; TL.TextSize=14; TL.TextXAlignment=Enum.TextXAlignment.Left; TL.TextTruncate=Enum.TextTruncate.AtEnd; TL.Parent=F
-    local DL=Instance.new("TextLabel"); DL.BackgroundTransparency=1; DL.Position=UDim2.new(0,56,0,34); DL.Size=UDim2.new(1,-164,0,38); DL.ZIndex=5; DL.Font=Enum.Font.Gotham; DL.Text=desc; DL.TextColor3=C.tSec; DL.TextSize=11; DL.TextXAlignment=Enum.TextXAlignment.Left; DL.TextWrapped=true; DL.Parent=F
-    local EB=Instance.new("TextButton"); EB.BackgroundColor3=col; EB.BorderSizePixel=0; EB.AnchorPoint=Vector2.new(1,0.5); EB.Position=UDim2.new(1,0,0.5,0); EB.Size=UDim2.new(0,96,0,32); EB.ZIndex=6; EB.Font=Enum.Font.GothamSemibold; EB.Text="▶  Execute"; EB.TextColor3=C.tPri; EB.TextSize=11; EB.Parent=F; Corn(EB,8)
-    local lit=col:Lerp(Color3.new(1,1,1),0.16); EB.MouseEnter:Connect(function() Tw(EB,0.1,{BackgroundColor3=lit}) end); EB.MouseLeave:Connect(function() Tw(EB,0.1,{BackgroundColor3=col}) end)
-    EB.MouseButton1Click:Connect(function() EB.Text="Running..."; task.delay(0.6,function() pcall(function() EB.Text="▶  Execute" end) end); RunLS(url) end)
-    -- spacer
-    local Sp=Instance.new("Frame"); Sp.BackgroundTransparency=1; Sp.BorderSizePixel=0; Sp.Size=UDim2.new(1,0,0,8); Sp.LayoutOrder=order+1; Sp.Parent=parent
+    local F=Instance.new("Frame"); F.BackgroundColor3=C.card; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,92); F.LayoutOrder=o; F.Parent=p; Corn(F,12); Strk(F,C.border,1); Pad(F,0,0,PD,PD)
+    local IC=Instance.new("Frame"); IC.BackgroundColor3=col; IC.BorderSizePixel=0; IC.AnchorPoint=Vector2.new(0,0.5); IC.Position=UDim2.new(0,0,0.5,0); IC.Size=UDim2.new(0,50,0,50); IC.ZIndex=5; IC.Parent=F; Corn(IC,12)
+    local IL=Instance.new("TextLabel"); IL.BackgroundTransparency=1; IL.Size=UDim2.new(1,0,1,0); IL.ZIndex=6; IL.Font=Enum.Font.GothamBold; IL.Text=icon; IL.TextSize=24; IL.TextColor3=Color3.new(1,1,1); IL.Parent=IC
+    local TL=Instance.new("TextLabel"); TL.BackgroundTransparency=1; TL.Position=UDim2.new(0,60,0,12); TL.Size=UDim2.new(1,-165,0,20); TL.ZIndex=5; TL.Font=Enum.Font.GothamBold; TL.Text=title; TL.TextColor3=C.tPri; TL.TextSize=14; TL.TextXAlignment=Enum.TextXAlignment.Left; TL.TextTruncate=Enum.TextTruncate.AtEnd; TL.Parent=F
+    local DL=Instance.new("TextLabel"); DL.BackgroundTransparency=1; DL.Position=UDim2.new(0,60,0,34); DL.Size=UDim2.new(1,-165,0,42); DL.ZIndex=5; DL.Font=Enum.Font.Gotham; DL.Text=desc; DL.TextColor3=C.tSec; DL.TextSize=11; DL.TextXAlignment=Enum.TextXAlignment.Left; DL.TextWrapped=true; DL.Parent=F
+    local EB=Instance.new("TextButton"); EB.BackgroundColor3=col; EB.BorderSizePixel=0; EB.AnchorPoint=Vector2.new(1,0.5); EB.Position=UDim2.new(1,0,0.5,0); EB.Size=UDim2.new(0,100,0,34); EB.ZIndex=6; EB.Font=Enum.Font.GothamSemibold; EB.Text="▶  Execute"; EB.TextColor3=C.tPri; EB.TextSize=11; EB.Parent=F; Corn(EB,9)
+    local lit2=col:Lerp(Color3.new(1,1,1),0.16); EB.MouseEnter:Connect(function() Tw(EB,0.1,{BackgroundColor3=lit2}) end); EB.MouseLeave:Connect(function() Tw(EB,0.1,{BackgroundColor3=col}) end)
+    EB.MouseButton1Click:Connect(function() EB.Text="Running..."; task.delay(0.7,function() pcall(function() EB.Text="▶  Execute" end) end); RunLS(url) end)
+    local Sp=Instance.new("Frame"); Sp.BackgroundTransparency=1; Sp.BorderSizePixel=0; Sp.Size=UDim2.new(1,0,0,8); Sp.LayoutOrder=o+1; Sp.Parent=p
 end
 
--- ══════════════════════════════════════════════════════════════════════════
---   DASHBOARD PAGE  (matching screenshot layout exactly)
--- ══════════════════════════════════════════════════════════════════════════
--- Content available width: WIN_W - SB_W - 1 (SVLine) = 730-48-1 = 681px
--- Inner after 12px padding each side: 681-24 = 657px
--- Dashboard uses absolute frame layout inside scroll area
-
+-- ═══════════════════════════════════════════════════════════════════
+--   DASHBOARD
+-- ═══════════════════════════════════════════════════════════════════
 Pad(DashPage,PD,PD,0,0)
 
--- Welcome card (full width, 82px tall)
-local Wel=Instance.new("Frame"); Wel.BackgroundColor3=C.welBg; Wel.BorderSizePixel=0; Wel.Size=UDim2.new(1,-24,0,82); Wel.LayoutOrder=1; Wel.Parent=DashPage; Corn(Wel,12); Strk(Wel,C.welBdr,1); Pad(Wel,0,0,14,14)
+local Wel=Instance.new("Frame"); Wel.BackgroundColor3=C.welBg; Wel.BorderSizePixel=0; Wel.Size=UDim2.new(1,-26,0,84); Wel.LayoutOrder=1; Wel.Parent=DashPage; Corn(Wel,14); Strk(Wel,C.welBdr,1); Pad(Wel,0,0,16,16)
+local WelGrad=Instance.new("UIGradient"); WelGrad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(22,34,72)),ColorSequenceKeypoint.new(1,Color3.fromRGB(14,20,48))}); WelGrad.Rotation=145; WelGrad.Parent=Wel
 
--- Avatar circle
-local WAv=Instance.new("Frame"); WAv.BackgroundColor3=Color3.fromRGB(35,52,95); WAv.BorderSizePixel=0; WAv.AnchorPoint=Vector2.new(0,0.5); WAv.Position=UDim2.new(0,0,0.5,0); WAv.Size=UDim2.new(0,55,0,55); WAv.ZIndex=4; WAv.Parent=Wel; Corn(WAv,99)
-local WAvi=Instance.new("TextLabel"); WAvi.BackgroundTransparency=1; WAvi.Size=UDim2.new(1,0,1,0); WAvi.ZIndex=5; WAvi.Font=Enum.Font.Gotham; WAvi.Text="👤"; WAvi.TextSize=26; WAvi.TextColor3=Color3.new(1,1,1); WAvi.Parent=WAv
+local WAv=Instance.new("Frame"); WAv.BackgroundColor3=Color3.fromRGB(32,48,92); WAv.BorderSizePixel=0; WAv.AnchorPoint=Vector2.new(0,0.5); WAv.Position=UDim2.new(0,0,0.5,0); WAv.Size=UDim2.new(0,58,0,58); WAv.ZIndex=4; WAv.Parent=Wel; Corn(WAv,99)
+local WAvi=Instance.new("TextLabel"); WAvi.BackgroundTransparency=1; WAvi.Size=UDim2.new(1,0,1,0); WAvi.ZIndex=5; WAvi.Font=Enum.Font.Gotham; WAvi.Text="👤"; WAvi.TextSize=28; WAvi.TextColor3=Color3.new(1,1,1); WAvi.Parent=WAv
 pcall(function() local img=Players:GetUserThumbnailAsync(LP.UserId,Enum.ThumbnailType.AvatarBust,Enum.ThumbnailSize.Size100x100); if img then WAvi.Text=""; local il=Instance.new("ImageLabel"); il.BackgroundTransparency=1; il.Size=UDim2.new(1,0,1,0); il.ZIndex=5; il.Image=img; il.Parent=WAv; Corn(il,99) end end)
+local WN=Instance.new("TextLabel"); WN.BackgroundTransparency=1; WN.Position=UDim2.new(0,70,0,16); WN.Size=UDim2.new(0.5,0,0,22); WN.ZIndex=4; WN.Font=Enum.Font.GothamBold; WN.Text="Hello, "..LP.Name; WN.TextColor3=C.tPri; WN.TextSize=18; WN.TextXAlignment=Enum.TextXAlignment.Left; WN.TextTruncate=Enum.TextTruncate.AtEnd; WN.Parent=Wel
+local WG=Instance.new("TextLabel"); WG.BackgroundTransparency=1; WG.Position=UDim2.new(0,70,0,40); WG.Size=UDim2.new(0.62,0,0,14); WG.ZIndex=4; WG.Font=Enum.Font.Gotham; WG.Text=Greet().."  ·  Luna Admin V5 Aurora"; WG.TextColor3=C.tSec; WG.TextSize=11; WG.TextXAlignment=Enum.TextXAlignment.Left; WG.TextTruncate=Enum.TextTruncate.AtEnd; WG.Parent=Wel
+local WT=Instance.new("TextLabel"); WT.BackgroundTransparency=1; WT.AnchorPoint=Vector2.new(1,0); WT.Position=UDim2.new(1,-10,0,14); WT.Size=UDim2.new(0,108,0,18); WT.ZIndex=4; WT.Font=Enum.Font.GothamBold; WT.Text=os.date("%H : %M : %S"); WT.TextColor3=C.tPri; WT.TextSize=13; WT.TextXAlignment=Enum.TextXAlignment.Right; WT.Parent=Wel
+local WD=Instance.new("TextLabel"); WD.BackgroundTransparency=1; WD.AnchorPoint=Vector2.new(1,0); WD.Position=UDim2.new(1,-10,0,34); WD.Size=UDim2.new(0,108,0,13); WD.ZIndex=4; WD.Font=Enum.Font.Gotham; WD.Text=os.date("%d / %m / %y"); WD.TextColor3=C.tSec; WD.TextSize=10; WD.TextXAlignment=Enum.TextXAlignment.Right; WD.Parent=Wel
+task.spawn(function() while Gui.Parent do task.wait(1); pcall(function() WT.Text=os.date("%H : %M : %S"); WD.Text=os.date("%d / %m / %y") end) end end)
 
-local WName=Instance.new("TextLabel"); WName.BackgroundTransparency=1; WName.Position=UDim2.new(0,68,0,16); WName.Size=UDim2.new(0.52,0,0,24); WName.ZIndex=4; WName.Font=Enum.Font.GothamBold; WName.Text="Hello, "..LP.Name; WName.TextColor3=C.tPri; WName.TextSize=18; WName.TextXAlignment=Enum.TextXAlignment.Left; WName.TextTruncate=Enum.TextTruncate.AtEnd; WName.Parent=Wel
+local DGap1=Instance.new("Frame"); DGap1.BackgroundTransparency=1; DGap1.BorderSizePixel=0; DGap1.Size=UDim2.new(1,0,0,8); DGap1.LayoutOrder=2; DGap1.Parent=DashPage
 
-local WGreet=Instance.new("TextLabel"); WGreet.BackgroundTransparency=1; WGreet.Position=UDim2.new(0,68,0,44); WGreet.Size=UDim2.new(0.62,0,0,16); WGreet.ZIndex=4; WGreet.Font=Enum.Font.Gotham; WGreet.Text=Greet().."  |  Luna Admin"; WGreet.TextColor3=C.tSec; WGreet.TextSize=11; WGreet.TextXAlignment=Enum.TextXAlignment.Left; WGreet.TextTruncate=Enum.TextTruncate.AtEnd; WGreet.Parent=Wel
+-- Lower row: Server card + Right stack
+local LRow=Instance.new("Frame"); LRow.BackgroundTransparency=1; LRow.BorderSizePixel=0; LRow.Size=UDim2.new(1,-26,0,336); LRow.LayoutOrder=3; LRow.Parent=DashPage; ListL(LRow,Enum.FillDirection.Horizontal,10)
 
--- Time top-right of welcome card
-local WTime=Instance.new("TextLabel"); WTime.BackgroundTransparency=1; WTime.AnchorPoint=Vector2.new(1,0); WTime.Position=UDim2.new(1,-10,0,14); WTime.Size=UDim2.new(0,110,0,18); WTime.ZIndex=4; WTime.Font=Enum.Font.GothamBold; WTime.Text=os.date("%H : %M : %S"); WTime.TextColor3=C.tPri; WTime.TextSize=13; WTime.TextXAlignment=Enum.TextXAlignment.Right; WTime.Parent=Wel
-local WDate=Instance.new("TextLabel"); WDate.BackgroundTransparency=1; WDate.AnchorPoint=Vector2.new(1,0); WDate.Position=UDim2.new(1,-10,0,34); WDate.Size=UDim2.new(0,110,0,14); WDate.ZIndex=4; WDate.Font=Enum.Font.Gotham; WDate.Text=os.date("%d / %m / %y"); WDate.TextColor3=C.tSec; WDate.TextSize=10; WDate.TextXAlignment=Enum.TextXAlignment.Right; WDate.Parent=Wel
-task.spawn(function() while Gui.Parent do task.wait(1); pcall(function() WTime.Text=os.date("%H : %M : %S"); WDate.Text=os.date("%d / %m / %y") end) end end)
+-- Server card (375px)
+local SrvCard=Instance.new("Frame"); SrvCard.BackgroundColor3=C.card; SrvCard.BorderSizePixel=0; SrvCard.Size=UDim2.new(0,375,1,0); SrvCard.ZIndex=4; SrvCard.Parent=LRow; Corn(SrvCard,14); Strk(SrvCard,C.border,1); Pad(SrvCard,14,14,14,14)
+local SrvT=Instance.new("TextLabel"); SrvT.BackgroundTransparency=1; SrvT.Size=UDim2.new(1,0,0,20); SrvT.ZIndex=5; SrvT.Font=Enum.Font.GothamBold; SrvT.Text="Server"; SrvT.TextColor3=C.tPri; SrvT.TextSize=15; SrvT.TextXAlignment=Enum.TextXAlignment.Left; SrvT.Parent=SrvCard
+local SrvS=Instance.new("TextLabel"); SrvS.BackgroundTransparency=1; SrvS.Position=UDim2.new(0,0,0,22); SrvS.Size=UDim2.new(1,0,0,16); SrvS.ZIndex=5; SrvS.Font=Enum.Font.Gotham; SrvS.Text="Information on the session you're currently in"; SrvS.TextColor3=C.tDim; SrvS.TextSize=10; SrvS.TextXAlignment=Enum.TextXAlignment.Left; SrvS.TextTruncate=Enum.TextTruncate.AtEnd; SrvS.Parent=SrvCard
 
--- Gap
-local DGap=Instance.new("Frame"); DGap.BackgroundTransparency=1; DGap.BorderSizePixel=0; DGap.Size=UDim2.new(1,0,0,8); DGap.LayoutOrder=2; DGap.Parent=DashPage
+local SrvGrid=Instance.new("Frame"); SrvGrid.BackgroundTransparency=1; SrvGrid.BorderSizePixel=0; SrvGrid.Position=UDim2.new(0,0,0,44); SrvGrid.Size=UDim2.new(1,0,1,-44); SrvGrid.ZIndex=5; SrvGrid.Parent=SrvCard
+local SGL=Instance.new("UIGridLayout"); SGL.CellPadding=UDim2.new(0,6,0,6); SGL.CellSize=UDim2.new(0.5,-3,0,76); SGL.SortOrder=Enum.SortOrder.LayoutOrder; SGL.Parent=SrvGrid
 
--- Lower row frame (Server | Right Stack)
-local LRow=Instance.new("Frame"); LRow.BackgroundTransparency=1; LRow.BorderSizePixel=0; LRow.Size=UDim2.new(1,-24,0,335); LRow.LayoutOrder=3; LRow.Parent=DashPage; ListL(LRow,Enum.FillDirection.Horizontal,8)
-
--- ── SERVER CARD (375px × 335px) ──────────────────────────────────────────
-local SrvCard=Instance.new("Frame"); SrvCard.BackgroundColor3=C.srvBg; SrvCard.BorderSizePixel=0; SrvCard.Size=UDim2.new(0,375,1,0); SrvCard.ZIndex=4; SrvCard.Parent=LRow; Corn(SrvCard,12); Strk(SrvCard,C.border,1); Pad(SrvCard,14,14,14,14)
-
-local SrvTitle=Instance.new("TextLabel"); SrvTitle.BackgroundTransparency=1; SrvTitle.Size=UDim2.new(1,0,0,20); SrvTitle.ZIndex=5; SrvTitle.Font=Enum.Font.GothamBold; SrvTitle.Text="Server"; SrvTitle.TextColor3=C.tPri; SrvTitle.TextSize=15; SrvTitle.TextXAlignment=Enum.TextXAlignment.Left; SrvTitle.Parent=SrvCard
-
-local SrvSub=Instance.new("TextLabel"); SrvSub.BackgroundTransparency=1; SrvSub.Position=UDim2.new(0,0,0,22); SrvSub.Size=UDim2.new(1,0,0,18); SrvSub.ZIndex=5; SrvSub.Font=Enum.Font.Gotham; SrvSub.Text="Information on the session you're currently in"; SrvSub.TextColor3=C.tDim; SrvSub.TextSize=10; SrvSub.TextXAlignment=Enum.TextXAlignment.Left; SrvSub.TextTruncate=Enum.TextTruncate.AtEnd; SrvSub.Parent=SrvCard
-
--- Stat cells grid (6 cells in 2×3)
--- Each cell: width=(375-28-6)/2=170.5≈170, height≈78 (with gap)
-local SrvGrid=Instance.new("Frame"); SrvGrid.BackgroundTransparency=1; SrvGrid.BorderSizePixel=0; SrvGrid.Position=UDim2.new(0,0,0,46); SrvGrid.Size=UDim2.new(1,0,1,-46); SrvGrid.ZIndex=5; SrvGrid.Parent=SrvCard
-local SrvGL=Instance.new("UIGridLayout"); SrvGL.CellPadding=UDim2.new(0,6,0,6); SrvGL.CellSize=UDim2.new(0.5,-3,0,76); SrvGL.SortOrder=Enum.SortOrder.LayoutOrder; SrvGL.Parent=SrvGrid
-
-local function SrvStat(lbl,valFn,order)
-    local Cell=Instance.new("Frame"); Cell.BackgroundColor3=C.cell; Cell.BorderSizePixel=0; Cell.ZIndex=6; Cell.LayoutOrder=order; Cell.Parent=SrvGrid; Corn(Cell,10); Pad(Cell,10,10,12,12)
-    local LblT=Instance.new("TextLabel"); LblT.BackgroundTransparency=1; LblT.Size=UDim2.new(1,0,0,14); LblT.ZIndex=7; LblT.Font=Enum.Font.GothamMedium; LblT.Text=lbl; LblT.TextColor3=C.tDim; LblT.TextSize=10; LblT.TextXAlignment=Enum.TextXAlignment.Left; LblT.Parent=Cell
-    local ValT=Instance.new("TextLabel"); ValT.BackgroundTransparency=1; ValT.Position=UDim2.new(0,0,0,16); ValT.Size=UDim2.new(1,0,1,-16); ValT.ZIndex=7; ValT.Font=Enum.Font.GothamSemibold; ValT.Text=valFn(); ValT.TextColor3=C.tPri; ValT.TextSize=12; ValT.TextXAlignment=Enum.TextXAlignment.Left; ValT.TextWrapped=true; ValT.Parent=Cell
-    return ValT, valFn
+local srvUpds={}
+local function SrvCell(l,fn,o)
+    local F=Instance.new("Frame"); F.BackgroundColor3=C.cell; F.BorderSizePixel=0; F.ZIndex=6; F.LayoutOrder=o; F.Parent=SrvGrid; Corn(F,10); Pad(F,10,10,12,12)
+    local LT=Instance.new("TextLabel"); LT.BackgroundTransparency=1; LT.Size=UDim2.new(1,0,0,13); LT.ZIndex=7; LT.Font=Enum.Font.GothamMedium; LT.Text=l; LT.TextColor3=C.tDim; LT.TextSize=9; LT.TextXAlignment=Enum.TextXAlignment.Left; LT.Parent=F
+    local VT=Instance.new("TextLabel"); VT.BackgroundTransparency=1; VT.Position=UDim2.new(0,0,0,15); VT.Size=UDim2.new(1,0,1,-15); VT.ZIndex=7; VT.Font=Enum.Font.GothamSemibold; VT.Text=fn(); VT.TextColor3=C.tPri; VT.TextSize=12; VT.TextXAlignment=Enum.TextXAlignment.Left; VT.TextWrapped=true; VT.Parent=F
+    table.insert(srvUpds,{v=VT,f=fn})
 end
-
-local srvUpdates={}
-local function SR(l,f,o) local vt,vf=SrvStat(l,f,o); table.insert(srvUpdates,{lbl=vt,fn=vf}) end
-
-SR("Players",         function() return #Players:GetPlayers().." playing" end,             1)
-SR("Maximum Players", function() return Players.MaxPlayers.." players can join" end,       2)
-SR("Latency",         function() return fps_val.." FPS  ·  "..Ping() end,                  3)
-SR("Server Region",   function() return "N/A" end,                                          4)
-SR("In server for",   function() return GetSessionTime() end,                               5)
-
--- Join Script cell (clickable)
+SrvCell("Players",function() return #Players:GetPlayers().." playing" end,1)
+SrvCell("Maximum Players",function() return Players.MaxPlayers.." max capacity" end,2)
+SrvCell("Latency",function() return fps_val.." FPS  ·  "..Ping() end,3)
+SrvCell("In Session",function() return GetSession() end,4)
+SrvCell("Server Region",function() return "N/A" end,5)
+-- Join Script cell
 local JCell=Instance.new("TextButton"); JCell.BackgroundColor3=C.cell; JCell.BorderSizePixel=0; JCell.ZIndex=6; JCell.LayoutOrder=6; JCell.Text=""; JCell.Font=Enum.Font.Gotham; JCell.TextSize=1; JCell.Parent=SrvGrid; Corn(JCell,10); Pad(JCell,10,10,12,12)
-local JLbl=Instance.new("TextLabel"); JLbl.BackgroundTransparency=1; JLbl.Size=UDim2.new(1,0,0,14); JLbl.ZIndex=7; JLbl.Font=Enum.Font.GothamMedium; JLbl.Text="Join Script"; JLbl.TextColor3=C.tDim; JLbl.TextSize=10; JLbl.TextXAlignment=Enum.TextXAlignment.Left; JLbl.Parent=JCell
-local JVal=Instance.new("TextLabel"); JVal.BackgroundTransparency=1; JVal.Position=UDim2.new(0,0,0,16); JVal.Size=UDim2.new(1,0,1,-16); JVal.ZIndex=7; JVal.Font=Enum.Font.GothamSemibold; JVal.Text="Tap to copy join script"; JVal.TextColor3=C.sky; JVal.TextSize=11; JVal.TextXAlignment=Enum.TextXAlignment.Left; JVal.TextWrapped=true; JVal.Parent=JCell
-JCell.MouseButton1Click:Connect(function() CopyClip(JOIN_SCRIPT); JVal.TextColor3=C.ok; JVal.Text="Copied!"; task.delay(2,function() JVal.TextColor3=C.sky; JVal.Text="Tap to copy join script" end) end)
-JCell.MouseEnter:Connect(function() Tw(JCell,0.1,{BackgroundColor3=Color3.fromRGB(26,26,38)}) end); JCell.MouseLeave:Connect(function() Tw(JCell,0.1,{BackgroundColor3=C.cell}) end)
+local JLT=Instance.new("TextLabel"); JLT.BackgroundTransparency=1; JLT.Size=UDim2.new(1,0,0,13); JLT.ZIndex=7; JLT.Font=Enum.Font.GothamMedium; JLT.Text="Join Script"; JLT.TextColor3=C.tDim; JLT.TextSize=9; JLT.TextXAlignment=Enum.TextXAlignment.Left; JLT.Parent=JCell
+local JVT=Instance.new("TextLabel"); JVT.BackgroundTransparency=1; JVT.Position=UDim2.new(0,0,0,15); JVT.Size=UDim2.new(1,0,1,-15); JVT.ZIndex=7; JVT.Font=Enum.Font.GothamSemibold; JVT.Text="Tap to copy join script"; JVT.TextColor3=C.sky; JVT.TextSize=11; JVT.TextXAlignment=Enum.TextXAlignment.Left; JVT.TextWrapped=true; JVT.Parent=JCell
+JCell.MouseButton1Click:Connect(function() local sc=string.format('game:GetService("TeleportService"):TeleportToPlaceInstance(%d,"%s")',game.PlaceId,tostring(game.JobId)); CopyClip(sc); JVT.TextColor3=C.ok; JVT.Text="Copied!"; task.delay(2,function() JVT.TextColor3=C.sky; JVT.Text="Tap to copy join script" end) end)
+JCell.MouseEnter:Connect(function() Tw(JCell,0.1,{BackgroundColor3=Color3.fromRGB(26,26,40)}) end); JCell.MouseLeave:Connect(function() Tw(JCell,0.1,{BackgroundColor3=C.cell}) end)
+task.spawn(function() while Gui.Parent do task.wait(2); pcall(function() for _,u in ipairs(srvUpds) do u.v.Text=u.f() end end) end end)
 
--- Update server stats every 2s
-task.spawn(function() while Gui.Parent do task.wait(2); pcall(function() for _,u in ipairs(srvUpdates) do u.lbl.Text=u.fn() end end) end end)
+-- Right stack (Codex + Friends) fills remaining width
+local RStack=Instance.new("Frame"); RStack.BackgroundTransparency=1; RStack.BorderSizePixel=0; RStack.Size=UDim2.new(1,-385,1,0); RStack.ZIndex=4; RStack.Parent=LRow; ListL(RStack,Enum.FillDirection.Vertical,8)
 
--- ── RIGHT STACK (271px × 335px) ─────────────────────────────────────────
-local RStack=Instance.new("Frame"); RStack.BackgroundTransparency=1; RStack.BorderSizePixel=0; RStack.Size=UDim2.new(1,-383,1,0); RStack.ZIndex=4; RStack.Parent=LRow; ListL(RStack,Enum.FillDirection.Vertical,8)
+-- CODEX CARD
+-- (codBg/codAcc/codMsg defined above, shared)
+local CodCard=Instance.new("Frame"); CodCard.BackgroundColor3=codBg; CodCard.BorderSizePixel=0; CodCard.Size=UDim2.new(1,0,0,160); CodCard.ZIndex=4; CodCard.Parent=RStack; Corn(CodCard,14); Strk(CodCard,codAcc:Lerp(Color3.new(0,0,0),0.55),1); Pad(CodCard,14,14,16,16)
+local CodT=Instance.new("TextLabel"); CodT.BackgroundTransparency=1; CodT.Size=UDim2.new(1,0,0,18); CodT.ZIndex=5; CodT.Font=Enum.Font.GothamBold; CodT.Text="Codex"; CodT.TextColor3=C.tPri; CodT.TextSize=14; CodT.TextXAlignment=Enum.TextXAlignment.Left; CodT.Parent=CodCard
+local CodE=Instance.new("TextLabel"); CodE.BackgroundTransparency=1; CodE.Position=UDim2.new(0,0,0,22); CodE.Size=UDim2.new(1,0,0,22); CodE.ZIndex=5; CodE.Font=Enum.Font.GothamBold; CodE.Text=EXEC_NAME; CodE.TextColor3=codAcc; CodE.TextSize=17; CodE.TextXAlignment=Enum.TextXAlignment.Left; CodE.Parent=CodCard
+local CodM=Instance.new("TextLabel"); CodM.BackgroundTransparency=1; CodM.Position=UDim2.new(0,0,0,48); CodM.Size=UDim2.new(1,0,1,-48); CodM.ZIndex=5; CodM.Font=Enum.Font.Gotham; CodM.Text=codMsg; CodM.TextColor3=codAcc:Lerp(Color3.new(1,1,1),0.42); CodM.TextSize=11; CodM.TextXAlignment=Enum.TextXAlignment.Left; CodM.TextWrapped=true; CodM.Parent=CodCard
 
--- CODEX / EXECUTOR CARD (271 × 163)
-local codexBg   = EXEC_SUPPORTED and C.codexOk   or C.codexErr
-local codexAcct = EXEC_SUPPORTED and C.ok         or C.err
-local codexMsg  = EXEC_SUPPORTED and "Your Executor is kindly Supported by this Script." or "Your Executor Isn't Officially Supported By This Script."
-
-local CodCard=Instance.new("Frame"); CodCard.BackgroundColor3=codexBg; CodCard.BorderSizePixel=0; CodCard.Size=UDim2.new(1,0,0,163); CodCard.ZIndex=4; CodCard.Parent=RStack; Corn(CodCard,12); Strk(CodCard,codexAcct:Lerp(Color3.new(0,0,0),0.5),1); Pad(CodCard,14,14,16,16)
-
-local CodTitle=Instance.new("TextLabel"); CodTitle.BackgroundTransparency=1; CodTitle.Size=UDim2.new(1,0,0,18); CodTitle.ZIndex=5; CodTitle.Font=Enum.Font.GothamBold; CodTitle.Text="Codex"; CodTitle.TextColor3=C.tPri; CodTitle.TextSize=14; CodTitle.TextXAlignment=Enum.TextXAlignment.Left; CodTitle.Parent=CodCard
-
-local CodExec=Instance.new("TextLabel"); CodExec.BackgroundTransparency=1; CodExec.Position=UDim2.new(0,0,0,22); CodExec.Size=UDim2.new(1,0,0,20); CodExec.ZIndex=5; CodExec.Font=Enum.Font.GothamBold; CodExec.Text=EXEC_NAME; CodExec.TextColor3=codexAcct; CodExec.TextSize=16; CodExec.TextXAlignment=Enum.TextXAlignment.Left; CodExec.Parent=CodCard
-
-local CodMsg=Instance.new("TextLabel"); CodMsg.BackgroundTransparency=1; CodMsg.Position=UDim2.new(0,0,0,46); CodMsg.Size=UDim2.new(1,0,1,-46); CodMsg.ZIndex=5; CodMsg.Font=Enum.Font.Gotham; CodMsg.Text=codexMsg; CodMsg.TextColor3=codexAcct:Lerp(Color3.new(1,1,1),0.4); CodMsg.TextSize=11; CodMsg.TextXAlignment=Enum.TextXAlignment.Left; CodMsg.TextWrapped=true; CodMsg.Parent=CodCard
-
--- FRIENDS CARD (271 × 164)
-local FriCard=Instance.new("Frame"); FriCard.BackgroundColor3=C.friBg; FriCard.BorderSizePixel=0; FriCard.Size=UDim2.new(1,0,0,164); FriCard.ZIndex=4; FriCard.Parent=RStack; Corn(FriCard,12); Strk(FriCard,C.border,1); Pad(FriCard,14,14,16,16)
-
-local FriTitle=Instance.new("TextLabel"); FriTitle.BackgroundTransparency=1; FriTitle.Size=UDim2.new(1,0,0,18); FriTitle.ZIndex=5; FriTitle.Font=Enum.Font.GothamBold; FriTitle.Text="Friends"; FriTitle.TextColor3=C.tPri; FriTitle.TextSize=14; FriTitle.TextXAlignment=Enum.TextXAlignment.Left; FriTitle.Parent=FriCard
-
-local FriSub=Instance.new("TextLabel"); FriSub.BackgroundTransparency=1; FriSub.Position=UDim2.new(0,0,0,21); FriSub.Size=UDim2.new(1,0,0,16); FriSub.ZIndex=5; FriSub.Font=Enum.Font.Gotham; FriSub.Text="Find out what your friends are currently doing"; FriSub.TextColor3=C.tDim; FriSub.TextSize=10; FriSub.TextXAlignment=Enum.TextXAlignment.Left; FriSub.TextTruncate=Enum.TextTruncate.AtEnd; FriSub.Parent=FriCard
-
--- 2×2 grid of friend stats
+-- FRIENDS CARD
+local FriCard=Instance.new("Frame"); FriCard.BackgroundColor3=C.card; FriCard.BorderSizePixel=0; FriCard.Size=UDim2.new(1,0,0,168); FriCard.ZIndex=4; FriCard.Parent=RStack; Corn(FriCard,14); Strk(FriCard,C.border,1); Pad(FriCard,14,14,16,16)
+local FriT=Instance.new("TextLabel"); FriT.BackgroundTransparency=1; FriT.Size=UDim2.new(1,0,0,18); FriT.ZIndex=5; FriT.Font=Enum.Font.GothamBold; FriT.Text="Friends"; FriT.TextColor3=C.tPri; FriT.TextSize=14; FriT.TextXAlignment=Enum.TextXAlignment.Left; FriT.Parent=FriCard
+local FriS=Instance.new("TextLabel"); FriS.BackgroundTransparency=1; FriS.Position=UDim2.new(0,0,0,22); FriS.Size=UDim2.new(1,0,0,14); FriS.ZIndex=5; FriS.Font=Enum.Font.Gotham; FriS.Text="Find out what your friends are currently doing"; FriS.TextColor3=C.tDim; FriS.TextSize=10; FriS.TextXAlignment=Enum.TextXAlignment.Left; FriS.TextTruncate=Enum.TextTruncate.AtEnd; FriS.Parent=FriCard
 local FriGrid=Instance.new("Frame"); FriGrid.BackgroundTransparency=1; FriGrid.BorderSizePixel=0; FriGrid.Position=UDim2.new(0,0,0,42); FriGrid.Size=UDim2.new(1,0,1,-42); FriGrid.ZIndex=5; FriGrid.Parent=FriCard
-local FriGL=Instance.new("UIGridLayout"); FriGL.CellPadding=UDim2.new(0,8,0,8); FriGL.CellSize=UDim2.new(0.5,-4,0.5,-4); FriGL.SortOrder=Enum.SortOrder.LayoutOrder; FriGL.Parent=FriGrid
-
-local friLabels={}
-local function FriStat(label,valKey,order)
-    local Cell=Instance.new("Frame"); Cell.BackgroundTransparency=1; Cell.BorderSizePixel=0; Cell.ZIndex=6; Cell.LayoutOrder=order; Cell.Parent=FriGrid
-    local LT=Instance.new("TextLabel"); LT.BackgroundTransparency=1; LT.Size=UDim2.new(1,0,0,14); LT.ZIndex=7; LT.Font=Enum.Font.GothamMedium; LT.Text=label; LT.TextColor3=C.tDim; LT.TextSize=10; LT.TextXAlignment=Enum.TextXAlignment.Left; LT.Parent=Cell
-    local VT=Instance.new("TextLabel"); VT.BackgroundTransparency=1; VT.Position=UDim2.new(0,0,0,14); VT.Size=UDim2.new(1,0,0,20); VT.ZIndex=7; VT.Font=Enum.Font.GothamBold; VT.Text="..."; VT.TextColor3=C.tPri; VT.TextSize=15; VT.TextXAlignment=Enum.TextXAlignment.Left; VT.Parent=Cell
-    local ST=Instance.new("TextLabel"); ST.BackgroundTransparency=1; ST.Position=UDim2.new(0,0,0,32); ST.Size=UDim2.new(1,0,0,12); ST.ZIndex=7; ST.Font=Enum.Font.Gotham; ST.Text="friends"; ST.TextColor3=C.tDim; ST.TextSize=9; ST.TextXAlignment=Enum.TextXAlignment.Left; ST.Parent=Cell
-    friLabels[valKey]=VT
+local FGL=Instance.new("UIGridLayout"); FGL.CellPadding=UDim2.new(0,8,0,8); FGL.CellSize=UDim2.new(0.5,-4,0.5,-4); FGL.SortOrder=Enum.SortOrder.LayoutOrder; FGL.Parent=FriGrid
+local friLbls={}
+local function FStat(l,k,o)
+    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.ZIndex=6; F.LayoutOrder=o; F.Parent=FriGrid
+    local LT=Instance.new("TextLabel"); LT.BackgroundTransparency=1; LT.Size=UDim2.new(1,0,0,14); LT.ZIndex=7; LT.Font=Enum.Font.GothamMedium; LT.Text=l; LT.TextColor3=C.tDim; LT.TextSize=10; LT.TextXAlignment=Enum.TextXAlignment.Left; LT.Parent=F
+    local VT=Instance.new("TextLabel"); VT.BackgroundTransparency=1; VT.Position=UDim2.new(0,0,0,14); VT.Size=UDim2.new(1,0,0,22); VT.ZIndex=7; VT.Font=Enum.Font.GothamBold; VT.Text="..."; VT.TextColor3=C.tPri; VT.TextSize=16; VT.TextXAlignment=Enum.TextXAlignment.Left; VT.Parent=F
+    local ST=Instance.new("TextLabel"); ST.BackgroundTransparency=1; ST.Position=UDim2.new(0,0,0,34); ST.Size=UDim2.new(1,0,0,11); ST.ZIndex=7; ST.Font=Enum.Font.Gotham; ST.Text="friends"; ST.TextColor3=C.tDim; ST.TextSize=9; ST.TextXAlignment=Enum.TextXAlignment.Left; ST.Parent=F
+    friLbls[k]=VT
 end
-FriStat("In Server","inSrv",1); FriStat("Offline","offline",2); FriStat("Online","online",3); FriStat("All","total",4)
+FStat("In Server","inSrv",1); FStat("Offline","offline",2); FStat("Online","online",3); FStat("All","total",4)
+task.spawn(function() while Gui.Parent do task.wait(0.5); if FD.done then pcall(function() for k,lb in pairs(friLbls) do lb.Text=tostring(FD[k]) end end); break end end end)
 
--- Update friend stats once loaded
-task.spawn(function()
-    while Gui.Parent do
-        task.wait(0.5)
-        if FD.done then
-            pcall(function()
-                for k,lbl in pairs(friLabels) do lbl.Text=tostring(FD[k]) end
-            end)
-            break
-        end
-    end
+-- Gap + Discord card
+local DGap2=Instance.new("Frame"); DGap2.BackgroundTransparency=1; DGap2.BorderSizePixel=0; DGap2.Size=UDim2.new(1,0,0,8); DGap2.LayoutOrder=4; DGap2.Parent=DashPage
+local DiscCard=Instance.new("TextButton"); DiscCard.BackgroundColor3=C.discBg; DiscCard.BorderSizePixel=0; DiscCard.Size=UDim2.new(1,-26,0,62); DiscCard.LayoutOrder=5; DiscCard.ZIndex=4; DiscCard.Font=Enum.Font.Gotham; DiscCard.Text=""; DiscCard.TextSize=1; DiscCard.Parent=DashPage; Corn(DiscCard,14); Pad(DiscCard,0,0,16,16)
+local DCGrd=Instance.new("UIGradient"); DCGrd.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(52,92,218)),ColorSequenceKeypoint.new(1,Color3.fromRGB(28,48,155))}); DCGrd.Rotation=132; DCGrd.Parent=DiscCard
+local DCI=Instance.new("TextLabel"); DCI.BackgroundTransparency=1; DCI.AnchorPoint=Vector2.new(0,0.5); DCI.Position=UDim2.new(0,0,0.5,0); DCI.Size=UDim2.new(0,28,0,28); DCI.ZIndex=5; DCI.Font=Enum.Font.GothamBold; DCI.Text="🎮"; DCI.TextSize=20; DCI.TextColor3=Color3.new(1,1,1); DCI.Parent=DiscCard
+local DCT=Instance.new("TextLabel"); DCT.BackgroundTransparency=1; DCT.Position=UDim2.new(0,36,0,10); DCT.Size=UDim2.new(0.52,0,0,20); DCT.ZIndex=5; DCT.Font=Enum.Font.GothamBold; DCT.Text="Discord"; DCT.TextColor3=Color3.new(1,1,1); DCT.TextSize=15; DCT.TextXAlignment=Enum.TextXAlignment.Left; DCT.Parent=DiscCard
+local DCS=Instance.new("TextLabel"); DCS.BackgroundTransparency=1; DCS.Position=UDim2.new(0,36,0,32); DCS.Size=UDim2.new(0.7,0,0,13); DCS.ZIndex=5; DCS.Font=Enum.Font.Gotham; DCS.Text="Tap to copy the Luna Admin discord link."; DCS.TextColor3=Color3.fromRGB(195,210,255); DCS.TextSize=10; DCS.TextXAlignment=Enum.TextXAlignment.Left; DCS.TextTruncate=Enum.TextTruncate.AtEnd; DCS.Parent=DiscCard
+DiscCard.MouseButton1Click:Connect(function() CopyClip("https://discord.gg/JGeVGv23TQ"); DCT.TextColor3=C.ok; DCT.Text="Copied!"; task.delay(1.5,function() DCT.TextColor3=Color3.new(1,1,1); DCT.Text="Discord" end) end)
+DiscCard.MouseEnter:Connect(function() Tw(DiscCard,0.1,{BackgroundColor3=Color3.fromRGB(42,68,188)}) end); DiscCard.MouseLeave:Connect(function() Tw(DiscCard,0.1,{BackgroundColor3=C.discBg}) end)
+
+-- ═════════════════════════ PLAYERS PAGE ═════════════════════════
+SecHdr(PlayPage,"God Mode",1)
+TogRow(PlayPage,"God Mode (Infinite Health)",2,function(s) S.god=s; if s then local h=GetHum(LP); if h then h.MaxHealth=math.huge; h.Health=math.huge end end end)
+
+SecHdr(PlayPage,"Speed & Jump",10)
+SpeedRow(PlayPage,"WalkSpeed",11,false)
+SpeedRow(PlayPage,"JumpPower",12,true)
+
+SecHdr(PlayPage,"Teleport",20)
+local tpInp=InpRow(PlayPage,"🔍  Player to teleport to...",21)
+ActBtn(PlayPage,"📍  Teleport to Player",Color3.fromRGB(40,85,178),22,function()
+    local t=FindP(tpInp.Text); if not t then return end
+    local tr=GetRoot(t); local mr=GetRoot(LP)
+    if tr and mr then pcall(function() mr.CFrame=tr.CFrame*CFrame.new(3,0,0) end) end
+end)
+ActBtn(PlayPage,"📋  Copy My Position",Color3.fromRGB(38,65,125),23,function()
+    local mr=GetRoot(LP); if mr then CopyClip(string.format("%.1f, %.1f, %.1f",mr.Position.X,mr.Position.Y,mr.Position.Z)) end
 end)
 
--- ── DISCORD CARD (bottom) ────────────────────────────────────────────────
-local DGap2=Instance.new("Frame"); DGap2.BackgroundTransparency=1; DGap2.BorderSizePixel=0; DGap2.Size=UDim2.new(1,0,0,8); DGap2.LayoutOrder=4; DGap2.Parent=DashPage
+SecHdr(PlayPage,"Fling",30)
+local fInp=InpRow(PlayPage,"🔍  Player name...",31)
+ActBtn(PlayPage,"🌀  Fling Selected",Color3.fromRGB(185,78,25),32,function() local t=FindP(fInp.Text); if not t then return end; task.spawn(FlingOne,t) end)
+ActBtn(PlayPage,"💥  Fling ALL",Color3.fromRGB(162,38,38),33,function() task.spawn(FlingAll) end)
 
-local DiscCard=Instance.new("TextButton"); DiscCard.BackgroundColor3=C.discBg; DiscCard.BorderSizePixel=0; DiscCard.Size=UDim2.new(1,-24,0,64); DiscCard.LayoutOrder=5; DiscCard.ZIndex=4; DiscCard.Font=Enum.Font.Gotham; DiscCard.Text=""; DiscCard.TextSize=1; DiscCard.Parent=DashPage; Corn(DiscCard,12); Pad(DiscCard,0,0,16,16)
-local DCGrad=Instance.new("UIGradient"); DCGrad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(55,95,215)),ColorSequenceKeypoint.new(1,Color3.fromRGB(32,52,160))}); DCGrad.Rotation=130; DCGrad.Parent=DiscCard
-local DCIco=Instance.new("TextLabel"); DCIco.BackgroundTransparency=1; DCIco.AnchorPoint=Vector2.new(0,0.5); DCIco.Position=UDim2.new(0,0,0.5,0); DCIco.Size=UDim2.new(0,28,0,28); DCIco.ZIndex=5; DCIco.Font=Enum.Font.GothamBold; DCIco.Text="🎮"; DCIco.TextSize=20; DCIco.TextColor3=Color3.new(1,1,1); DCIco.Parent=DiscCard
-local DCTitle=Instance.new("TextLabel"); DCTitle.BackgroundTransparency=1; DCTitle.Position=UDim2.new(0,36,0,10); DCTitle.Size=UDim2.new(0.55,0,0,20); DCTitle.ZIndex=5; DCTitle.Font=Enum.Font.GothamBold; DCTitle.Text="Discord"; DCTitle.TextColor3=Color3.new(1,1,1); DCTitle.TextSize=15; DCTitle.TextXAlignment=Enum.TextXAlignment.Left; DCTitle.Parent=DiscCard
-local DCSub=Instance.new("TextLabel"); DCSub.BackgroundTransparency=1; DCSub.Position=UDim2.new(0,36,0,32); DCSub.Size=UDim2.new(0.7,0,0,14); DCSub.ZIndex=5; DCSub.Font=Enum.Font.Gotham; DCSub.Text="Tap to copy the Luna Admin discord link."; DCSub.TextColor3=Color3.fromRGB(195,210,255); DCSub.TextSize=10; DCSub.TextXAlignment=Enum.TextXAlignment.Left; DCSub.TextTruncate=Enum.TextTruncate.AtEnd; DCSub.Parent=DiscCard
-DiscCard.MouseButton1Click:Connect(function() CopyClip("https://discord.gg/JGeVGv23TQ"); DCTitle.TextColor3=C.ok; DCTitle.Text="Copied!"; task.delay(1.5,function() DCTitle.TextColor3=Color3.new(1,1,1); DCTitle.Text="Discord" end) end)
-DiscCard.MouseEnter:Connect(function() Tw(DiscCard,0.1,{BackgroundColor3=Color3.fromRGB(44,68,185)}) end); DiscCard.MouseLeave:Connect(function() Tw(DiscCard,0.1,{BackgroundColor3=C.discBg}) end)
+SecHdr(PlayPage,"Player List",40)
+local plrLbl=InfoLbl(PlayPage,"Tap Refresh to load.",C.tDim,41); plrLbl.AutomaticSize=Enum.AutomaticSize.Y
+ActBtn(PlayPage,"🔄  Refresh List",Color3.fromRGB(26,26,38),42,function()
+    local t={}; for _,p in ipairs(Players:GetPlayers()) do table.insert(t,(p==LP and "★ " or "• ")..p.Name..(p.DisplayName~=p.Name and " ("..p.DisplayName..")" or "")) end; plrLbl.Text=table.concat(t,"\n")
+end)
 
--- ══════════════════════════════════════════════════════════════════════════
---   PLAYERS PAGE
--- ══════════════════════════════════════════════════════════════════════════
-SecHdr(PlayPage,"God Mode",1); TogRow(PlayPage,"God Mode (Infinite Health)",2,function(s) S.god=s; if s then local h=GetHum(LP); if h then h.MaxHealth=math.huge; h.Health=math.huge end end end)
-SecHdr(PlayPage,"Speed & Jump",10); SpeedJumpRow(PlayPage,"Speed",11,false); SpeedJumpRow(PlayPage,"Jump",12,true)
-SecHdr(PlayPage,"Fling",20); local fInp=InpRow(PlayPage,"🔍  Player name...",21)
-ActBtn(PlayPage,"🌀  Fling Selected",Color3.fromRGB(185,78,25),22,function() local t=FindP(fInp.Text); if not t then return end; task.spawn(FlingOne,t) end)
-ActBtn(PlayPage,"💥  Fling ALL",Color3.fromRGB(165,38,38),23,function() task.spawn(FlingAll) end)
-SecHdr(PlayPage,"Player List",30); local plrLbl=InfoLbl(PlayPage,"Tap Refresh to load.",C.tDim,31); plrLbl.AutomaticSize=Enum.AutomaticSize.Y
-ActBtn(PlayPage,"🔄  Refresh",Color3.fromRGB(28,28,38),32,function() local t={}; for _,p in ipairs(Players:GetPlayers()) do table.insert(t,(p==LP and "★ " or "• ")..p.Name..(p.DisplayName~=p.Name and " ("..p.DisplayName..")" or "")) end; plrLbl.Text=table.concat(t,"\n") end)
+-- ── LUNA PREMIUM SECTION ──────────────────────────────────────────
+local PremGap=Instance.new("Frame"); PremGap.BackgroundTransparency=1; PremGap.BorderSizePixel=0; PremGap.Size=UDim2.new(1,0,0,8); PremGap.LayoutOrder=50; PremGap.Parent=PlayPage
+local PremSep=Instance.new("Frame"); PremSep.BackgroundColor3=C.premBdr; PremSep.BackgroundTransparency=0.6; PremSep.BorderSizePixel=0; PremSep.Size=UDim2.new(1,0,0,1); PremSep.LayoutOrder=51; PremSep.Parent=PlayPage
 
--- ══════════════════════════════════════════════════════════════════════════
---   VISUALS PAGE
--- ══════════════════════════════════════════════════════════════════════════
+local PremHdr=Instance.new("Frame"); PremHdr.BackgroundTransparency=1; PremHdr.BorderSizePixel=0; PremHdr.Size=UDim2.new(1,0,0,28); PremHdr.LayoutOrder=52; PremHdr.Parent=PlayPage; Pad(PremHdr,2,0,PD,PD)
+local PHLL=Instance.new("TextLabel"); PHLL.BackgroundTransparency=1; PHLL.Position=UDim2.new(0,0,0,0); PHLL.Size=UDim2.new(0.6,0,1,0); PHLL.ZIndex=5; PHLL.Font=Enum.Font.GothamBold; PHLL.Text="✦  LUNA ADMIN.PREMIUM"; PHLL.TextColor3=C.gold; PHLL.TextSize=9.5; PHLL.TextXAlignment=Enum.TextXAlignment.Left; PHLL.Parent=PremHdr
+local PHLock=Instance.new("TextLabel"); PHLock.BackgroundTransparency=1; PHLock.AnchorPoint=Vector2.new(1,0.5); PHLock.Position=UDim2.new(1,0,0.5,0); PHLock.Size=UDim2.new(0,80,0,18); PHLock.ZIndex=5; PHLock.Font=Enum.Font.GothamSemibold; PHLock.TextColor3=C.tDim; PHLock.TextSize=10; PHLock.TextXAlignment=Enum.TextXAlignment.Right; PHLock.Parent=PremHdr
+local function UpdatePremLock() PHLock.Text=PREMIUM_UNLOCKED and "🔓 Unlocked" or "🔒 Locked" ; PHLock.TextColor3=PREMIUM_UNLOCKED and C.ok or C.tDim end
+UpdatePremLock()
+
+-- Premium features (locked behind key system)
+local premFeatureToggleStore={}
+
+local function PremTogRow(p,l,o,cb)
+    local F=Instance.new("Frame"); F.BackgroundColor3=Color3.fromRGB(22,18,8); F.BackgroundTransparency=0.1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,44); F.LayoutOrder=o; F.Parent=p; Pad(F,0,0,PD,PD); Corn(F,8); Strk(F,C.premBdr:Lerp(Color3.new(0,0,0),0.6),0.8)
+    local sep=Instance.new("Frame"); sep.BackgroundColor3=C.sep; sep.BorderSizePixel=0; sep.AnchorPoint=Vector2.new(0,1); sep.Position=UDim2.new(0,0,1,0); sep.Size=UDim2.new(1,0,0,1); sep.ZIndex=4; sep.Parent=F
+    local Lbl=Instance.new("TextLabel"); Lbl.BackgroundTransparency=1; Lbl.Position=UDim2.new(0,0,0,0); Lbl.Size=UDim2.new(1,-56,1,0); Lbl.ZIndex=5; Lbl.Font=Enum.Font.GothamMedium; Lbl.Text=l; Lbl.TextColor3=PREMIUM_UNLOCKED and C.tPri or C.tDim; Lbl.TextSize=13; Lbl.TextXAlignment=Enum.TextXAlignment.Left; Lbl.TextWrapped=true; Lbl.Parent=F
+    local Bg=Instance.new("Frame"); Bg.AnchorPoint=Vector2.new(1,0.5); Bg.BackgroundColor3=C.togOff; Bg.BorderSizePixel=0; Bg.Position=UDim2.new(1,0,0.5,0); Bg.Size=UDim2.new(0,44,0,24); Bg.ZIndex=5; Bg.Parent=F; Corn(Bg,99)
+    local Knob=Instance.new("Frame"); Knob.AnchorPoint=Vector2.new(0,0.5); Knob.BackgroundColor3=C.knob; Knob.BorderSizePixel=0; Knob.Position=UDim2.new(0,3,0.5,0); Knob.Size=UDim2.new(0,18,0,18); Knob.ZIndex=6; Knob.Parent=Bg; Corn(Knob,99)
+    local Ca=Instance.new("TextButton"); Ca.BackgroundTransparency=1; Ca.BorderSizePixel=0; Ca.Size=UDim2.new(1,0,1,0); Ca.ZIndex=10; Ca.Text=""; Ca.Font=Enum.Font.Gotham; Ca.TextSize=1; Ca.Parent=F
+    local on=false
+    local function Set(s)
+        if not PREMIUM_UNLOCKED then OpenKeyUI(); return end
+        on=s; if s then Tw(Bg,0.15,{BackgroundColor3=C.gold}); Tw(Knob,0.15,{Position=UDim2.new(1,-21,0.5,0)}) else Tw(Bg,0.15,{BackgroundColor3=C.togOff}); Tw(Knob,0.15,{Position=UDim2.new(0,3,0.5,0)}) end
+        if cb then task.spawn(pcall,cb,s) end
+    end
+    Ca.MouseButton1Click:Connect(function() Set(not on) end)
+    table.insert(PREMIUM_FEATURES,function() Lbl.TextColor3=C.tPri end)
+    return {Set=Set,Get=function() return on end}
+end
+
+local function PremActBtn(p,l,col,o,cb)
+    col=col or C.gold
+    local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,40); F.LayoutOrder=o; F.Parent=p; Pad(F,4,4,PD,PD)
+    local B=Instance.new("TextButton"); B.BackgroundColor3=col; B.BorderSizePixel=0; B.Size=UDim2.new(1,0,1,0); B.ZIndex=5; B.Font=Enum.Font.GothamSemibold; B.Text=l; B.TextColor3=PREMIUM_UNLOCKED and Color3.fromRGB(20,12,4) or C.tDim; B.TextSize=12; B.TextWrapped=true; B.Parent=F; Corn(B,9); B.BackgroundTransparency=PREMIUM_UNLOCKED and 0 or 0.6
+    local lit2=col:Lerp(Color3.new(1,1,1),0.14)
+    B.MouseButton1Click:Connect(function()
+        if not PREMIUM_UNLOCKED then OpenKeyUI(); return end
+        if cb then task.spawn(pcall,cb) end
+    end)
+    table.insert(PREMIUM_FEATURES,function() B.BackgroundTransparency=0; B.TextColor3=Color3.fromRGB(20,12,4) end)
+    return B
+end
+
+PremTogRow(PlayPage,"⚡  Anti-Void  (prevents falling out of map)",53,function(s) S.antiVoid=s end)
+PremTogRow(PlayPage,"🌀  Infinite Spin (IY style)",54,function(s) S.spin=s end)
+PremTogRow(PlayPage,"🛡️  Permanent God Mode (survives respawn)",55,function(s) S.god=s end)
+PremActBtn(PlayPage,"⚡  Set Speed  ×5  (instant 80 walkspeed)",C.gold,56,function() S.spd=80; local h=GetHum(LP); if h then h.WalkSpeed=80 end end)
+PremActBtn(PlayPage,"🦘  Set Jump  ×10  (instant 500 jumppower)",Color3.fromRGB(200,160,50),57,function() S.jmp=500; local h=GetHum(LP); if h then h.JumpPower=500 end end)
+PremActBtn(PlayPage,"💣  Vacuum Fling  (pulls all to you then flings)",Color3.fromRGB(188,80,22),58,function()
+    local mr=GetRoot(LP); if not mr then return end
+    for _,p in ipairs(Players:GetPlayers()) do if p~=LP then
+        local tr=GetRoot(p); if tr then pcall(function() tr.CFrame=mr.CFrame*CFrame.new(math.random(-3,3),0,math.random(-3,3)) end) end
+    end end; task.wait(0.2); FlingAll()
+end)
+PremActBtn(PlayPage,"📡  Teleport to Random Player",Color3.fromRGB(38,88,178),59,function()
+    local others={}; for _,p in ipairs(Players:GetPlayers()) do if p~=LP then table.insert(others,p) end end
+    if #others>0 then local t=others[math.random(#others)]; local tr=GetRoot(t); local mr=GetRoot(LP); if tr and mr then pcall(function() mr.CFrame=tr.CFrame*CFrame.new(3,0,0) end) end end
+end)
+
+-- Unlock Button
+local PremBtnF=Instance.new("Frame"); PremBtnF.BackgroundTransparency=1; PremBtnF.BorderSizePixel=0; PremBtnF.Size=UDim2.new(1,0,0,48); PremBtnF.LayoutOrder=70; PremBtnF.Parent=PlayPage; Pad(PremBtnF,5,5,PD,PD)
+local PremBtn=Instance.new("TextButton"); PremBtn.BackgroundColor3=C.premBg; PremBtn.BorderSizePixel=0; PremBtn.Size=UDim2.new(1,0,1,0); PremBtn.ZIndex=5; PremBtn.Font=Enum.Font.GothamBold; PremBtn.Text="✦  Unlock Luna Admin.Premium  —  Get Key"; PremBtn.TextColor3=C.gold; PremBtn.TextSize=13; PremBtn.Parent=PremBtnF; Corn(PremBtn,10); Strk(PremBtn,C.premBdr,1.5)
+local PremBtnGrad=Instance.new("UIGradient"); PremBtnGrad.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(55,35,8)),ColorSequenceKeypoint.new(1,Color3.fromRGB(32,20,5))}); PremBtnGrad.Rotation=90; PremBtnGrad.Parent=PremBtn
+PremBtn.MouseEnter:Connect(function() Tw(PremBtn,0.12,{BackgroundColor3=Color3.fromRGB(65,42,10)}) end); PremBtn.MouseLeave:Connect(function() Tw(PremBtn,0.12,{BackgroundColor3=C.premBg}) end)
+PremBtn.MouseButton1Click:Connect(function()
+    if PREMIUM_UNLOCKED then PremBtn.Text="✅  Premium Active — Thank you!"; PremBtn.TextColor3=C.ok; return end
+    OpenKeyUI()
+end)
+table.insert(PREMIUM_FEATURES,function() PremBtn.Text="✅  Luna Admin.Premium — Unlocked"; PremBtn.TextColor3=C.ok; UpdatePremLock() end)
+
+-- ═════════════════════════ VISUALS PAGE ════════════════════
 SecHdr(VisuPage,"ESP  (Drawing API)",1)
-if not DrawOK then local wF=Instance.new("Frame"); wF.BackgroundColor3=Color3.fromRGB(50,22,22); wF.BorderSizePixel=0; wF.Size=UDim2.new(1,-24,0,34); wF.LayoutOrder=2; wF.Parent=VisuPage; Corn(wF,8); Pad(wF,0,0,PD,PD); local wL=Instance.new("TextLabel"); wL.BackgroundTransparency=1; wL.Size=UDim2.new(1,0,1,0); wL.ZIndex=5; wL.Font=Enum.Font.GothamSemibold; wL.Text="⚠  Trusted executor required for Drawing features"; wL.TextColor3=C.err; wL.TextSize=11; wL.TextWrapped=true; wL.TextXAlignment=Enum.TextXAlignment.Left; wL.Parent=wF end
+if not DrawOK then local wF=Instance.new("Frame"); wF.BackgroundColor3=Color3.fromRGB(48,18,18); wF.BorderSizePixel=0; wF.Size=UDim2.new(1,-26,0,34); wF.LayoutOrder=2; wF.Parent=VisuPage; Corn(wF,8); Pad(wF,0,0,PD,PD); local wL=Instance.new("TextLabel"); wL.BackgroundTransparency=1; wL.Size=UDim2.new(1,0,1,0); wL.ZIndex=5; wL.Font=Enum.Font.GothamSemibold; wL.Text="⚠  Use a trusted executor (Synapse/KRNL/Fluxus) for Drawing API features"; wL.TextColor3=C.err; wL.TextSize=11; wL.TextWrapped=true; wL.TextXAlignment=Enum.TextXAlignment.Left; wL.Parent=wF end
 TogRow(VisuPage,"ESP Boxes + Names",3,function(s) S.esp=s; if s then for _,p in ipairs(Players:GetPlayers()) do InitESP(p) end end end)
 TogRow(VisuPage,"Show HP Bar",4,function(s) S.showHP=s end)
 TogRow(VisuPage,"Show Distance",5,function(s) S.showDist=s end)
-SecHdr(VisuPage,"Tracers",10); TogRow(VisuPage,"Tracers to All Players",11,function(s) S.tracer=s; if s then for _,p in ipairs(Players:GetPlayers()) do InitESP(p) end end end)
-SecHdr(VisuPage,"Chams",20); TogRow(VisuPage,"Player Chams (SelectionBox)",21,function(s) S.cham=s; if s then for _,p in ipairs(Players:GetPlayers()) do if p~=LP and p.Character and not ChamData[p] then local sel=Instance.new("SelectionBox"); sel.Adornee=p.Character; sel.Color3=ESPCol(p); sel.LineThickness=0.05; sel.SurfaceTransparency=0.72; sel.SurfaceColor3=ESPCol(p); sel.Parent=CoreGui; ChamData[p]=sel end end else ClearChams() end end)
-SecHdr(VisuPage,"Environment",30); TogRow(VisuPage,"Fullbright",31,function(s) S.fullbrite=s; Lighting.Brightness=s and 6 or 1; if s then Lighting.ClockTime=14 end end)
+SecHdr(VisuPage,"Tracers",10)
+TogRow(VisuPage,"Tracers to All Players",11,function(s) S.tracer=s; if s then for _,p in ipairs(Players:GetPlayers()) do InitESP(p) end end end)
+SecHdr(VisuPage,"Chams",20)
+TogRow(VisuPage,"Player Chams (SelectionBox)",21,function(s) S.cham=s; if s then for _,p in ipairs(Players:GetPlayers()) do if p~=LP and p.Character and not ChamData[p] then local sel=Instance.new("SelectionBox"); sel.Adornee=p.Character; sel.Color3=ESPCol(p); sel.LineThickness=0.05; sel.SurfaceTransparency=0.72; sel.SurfaceColor3=ESPCol(p); sel.Parent=CoreGui; ChamData[p]=sel end end else ClearChams() end end)
+SecHdr(VisuPage,"Environment & Overlays",30)
+TogRow(VisuPage,"Fullbright",31,function(s) S.fullbrite=s; Lighting.Brightness=s and 6 or 1; if s then Lighting.ClockTime=14 end end)
 TogRow(VisuPage,"Custom Crosshair",32,function(s) CrH.Visible=s; CrV.Visible=s; S.xhair=s end)
 TogRow(VisuPage,"FOV Circle",33,function(s) FovCirc.Visible=s; S.fov=s end)
+SecHdr(VisuPage,"Time of Day",40)
+local tRow2=Instance.new("Frame"); tRow2.BackgroundTransparency=1; tRow2.BorderSizePixel=0; tRow2.Size=UDim2.new(1,0,0,40); tRow2.LayoutOrder=41; tRow2.Parent=VisuPage; Pad(tRow2,4,4,PD,PD); ListL(tRow2,Enum.FillDirection.Horizontal,6)
+for _,td in ipairs({{"☀️ Day",Color3.fromRGB(165,118,20),12},{"🌅 Sunset",Color3.fromRGB(155,72,20),18},{"🌙 Night",Color3.fromRGB(18,18,48),0}}) do local B=Instance.new("TextButton"); B.BackgroundColor3=td[2]; B.BorderSizePixel=0; B.Size=UDim2.new(0.32,0,1,0); B.ZIndex=5; B.Font=Enum.Font.GothamSemibold; B.Text=td[1]; B.TextColor3=C.tPri; B.TextSize=11; B.Parent=tRow2; Corn(B,8); B.MouseButton1Click:Connect(function() Lighting.ClockTime=td[3] end) end
 
--- ══════════════════════════════════════════════════════════════════════════
---   NDS PAGE (conditional)
--- ══════════════════════════════════════════════════════════════════════════
+-- ═════════════════════════ NDS PAGE ════════════════════
 if IS_NDS and NDSPage then
-    SecHdr(NDSPage,"Disaster Detection",1)
-    local disLbl=InfoLbl(NDSPage,"Detecting...",C.warn,2); disLbl.Font=Enum.Font.GothamSemibold; disLbl.TextSize=13
-    task.spawn(function() while Gui.Parent do task.wait(1.5); pcall(function() local d=GetDisaster(); disLbl.Text="Disaster: "..d; disLbl.TextColor3=d=="None / Waiting" and C.tDim or C.warn end) end end)
-    ActBtn(NDSPage,"🔍  Detect Now",Color3.fromRGB(32,76,152),3,function() local d=GetDisaster(); disLbl.Text="Disaster: "..d; disLbl.TextColor3=d=="None / Waiting" and C.tDim or C.warn end)
-    SecHdr(NDSPage,"Auto Survive",10); TogRow(NDSPage,"Auto Safe  (maintains Y above 320)",11,function(s) S.ndsAuto=s end)
-    SecHdr(NDSPage,"Teleport",20)
-    ActBtn(NDSPage,"☁️  Teleport to Sky  (Y=320)",Color3.fromRGB(52,104,195),21,function() local r=GetRoot(LP); if r then pcall(function() r.CFrame=CFrame.new(r.Position.X,320,r.Position.Z) end) end end)
-    ActBtn(NDSPage,"🏠  Map Center  (0, 320, 0)",Color3.fromRGB(44,82,158),22,function() local r=GetRoot(LP); if r then pcall(function() r.CFrame=CFrame.new(0,320,0) end) end end)
-    ActBtn(NDSPage,"🏔  Highest Platform",Color3.fromRGB(138,106,25),23,function() local r=GetRoot(LP); if not r then return end; local best=80; pcall(function() for _,p in ipairs(workspace:GetDescendants()) do if p:IsA("BasePart") and p.Size.X>4 and p.Size.Z>4 and not(LP.Character and p:IsDescendantOf(LP.Character)) then if p.Position.Y>best then best=p.Position.Y end end end end); pcall(function() r.CFrame=CFrame.new(r.Position.X,best+6,r.Position.Z) end) end)
-    ActBtn(NDSPage,"⬆  Jump +100 Studs",Color3.fromRGB(178,110,32),24,function() local r=GetRoot(LP); if r then pcall(function() r.CFrame=CFrame.new(r.Position+Vector3.new(0,100,0)) end) end end)
-    SecHdr(NDSPage,"Survival Pack",30)
-    ActBtn(NDSPage,"🌟  ONE-CLICK PACK  (God + Fly + Noclip + AutoSafe)",Color3.fromRGB(148,118,15),31,function() S.god=true; S.noclip=true; S.fly=true; S.ndsAuto=true; local h=GetHum(LP); if h then h.MaxHealth=math.huge; h.Health=math.huge; h.WalkSpeed=55 end; S.spd=55 end)
-    ActBtn(NDSPage,"❌  Reset All",Color3.fromRGB(36,32,48),32,function() S.god=false; S.fly=false; S.noclip=false; S.ndsAuto=false; S.spd=16; S.jmp=50; local h=GetHum(LP); if h then h.MaxHealth=100; h.Health=100; h.WalkSpeed=16; h.JumpPower=50 end end)
+    SecHdr(NDSPage,"Live Disaster Detection",1)
+    local disLbl=InfoLbl(NDSPage,"🔍 Detecting...",C.warn,2); disLbl.Font=Enum.Font.GothamBold; disLbl.TextSize=14
+    task.spawn(function() while Gui.Parent do task.wait(1.5); pcall(function() local d=GetDisaster(); disLbl.Text=d; disLbl.TextColor3=d:find("None") and C.tDim or C.warn end) end end)
+    ActBtn(NDSPage,"🔍  Force Detect Now",Color3.fromRGB(30,72,150),3,function() local d=GetDisaster(); disLbl.Text=d; disLbl.TextColor3=d:find("None") and C.tDim or C.warn end)
+
+    SecHdr(NDSPage,"Auto Survive",10)
+    TogRow(NDSPage,"🛡️  Auto Safe  (maintains Y above 320)",11,function(s) S.ndsAuto=s end)
+    TogRow(NDSPage,"⚓  Anti-Void  (catch < Y −80)",12,function(s) S.antiVoid=s end)
+
+    SecHdr(NDSPage,"Teleport Tools",20)
+    ActBtn(NDSPage,"☁️  Teleport to Sky  (Y = 350)",Color3.fromRGB(50,100,195),21,function() local r=GetRoot(LP); if r then pcall(function() r.CFrame=CFrame.new(r.Position.X,350,r.Position.Z) end) end end)
+    ActBtn(NDSPage,"🏠  Map Center  (0, 350, 0)",Color3.fromRGB(42,80,158),22,function() local r=GetRoot(LP); if r then pcall(function() r.CFrame=CFrame.new(0,350,0) end) end end)
+    ActBtn(NDSPage,"🏔  Find Highest Platform",Color3.fromRGB(138,105,22),23,function()
+        local r=GetRoot(LP); if not r then return end; local best=80
+        pcall(function() for _,p in ipairs(workspace:GetDescendants()) do if p:IsA("BasePart") and p.Size.X>4 and p.Size.Z>4 and not(LP.Character and p:IsDescendantOf(LP.Character)) then if p.Position.Y>best then best=p.Position.Y end end end end)
+        pcall(function() r.CFrame=CFrame.new(r.Position.X,best+6,r.Position.Z) end)
+    end)
+    ActBtn(NDSPage,"⬆  Jump Up +120 Studs",Color3.fromRGB(175,108,30),24,function() local r=GetRoot(LP); if r then pcall(function() r.CFrame=CFrame.new(r.Position+Vector3.new(0,120,0)) end) end end)
+    ActBtn(NDSPage,"🎯  Teleport to Spawn",Color3.fromRGB(48,95,172),25,function()
+        local r=GetRoot(LP); if not r then return end
+        local spawn=workspace:FindFirstChildOfClass("SpawnLocation")
+        if spawn then pcall(function() r.CFrame=CFrame.new(spawn.Position+Vector3.new(0,5,0)) end)
+        else pcall(function() r.CFrame=CFrame.new(0,50,0) end) end
+    end)
+
+    SecHdr(NDSPage,"Survival Tools",30)
+    TogRow(NDSPage,"👻  Noclip  (pass through walls)",31,function(s) S.noclip=s end)
+    TogRow(NDSPage,"🚀  Flight  (WASD + Space/Ctrl)",32,function(s) S.fly=s end)
+    TogRow(NDSPage,"🛡️  God Mode",33,function(s) S.god=s; if s then local h=GetHum(LP); if h then h.MaxHealth=math.huge; h.Health=math.huge end end end)
+    ActBtn(NDSPage,"⚡  Escape Speed  (WalkSpeed 150)",Color3.fromRGB(82,52,155),34,function() S.spd=150; local h=GetHum(LP); if h then h.WalkSpeed=150 end end)
+
+    SecHdr(NDSPage,"One-Click Packs",40)
+    ActBtn(NDSPage,"🌟  SURVIVAL PACK  —  God + Fly + Noclip + AutoSafe",Color3.fromRGB(145,115,15),41,function() S.god=true; S.noclip=true; S.fly=true; S.ndsAuto=true; local h=GetHum(LP); if h then h.MaxHealth=math.huge; h.Health=math.huge; h.WalkSpeed=55 end; S.spd=55 end)
+    ActBtn(NDSPage,"🏃  RUNNER PACK  —  Speed 120 + InfJump + AntiVoid",Color3.fromRGB(35,118,68),42,function() S.spd=120; S.infJump=true; S.antiVoid=true; local h=GetHum(LP); if h then h.WalkSpeed=120; h.JumpPower=100 end end)
+    ActBtn(NDSPage,"❌  Reset All NDS Settings",Color3.fromRGB(35,30,48),43,function() S.god=false; S.fly=false; S.noclip=false; S.ndsAuto=false; S.antiVoid=false; S.infJump=false; S.spd=16; S.jmp=50; local h=GetHum(LP); if h then h.MaxHealth=100; h.Health=100; h.WalkSpeed=16; h.JumpPower=50 end end)
 end
 
--- ══════════════════════════════════════════════════════════════════════════
---   SCRIPT HUBS PAGE
--- ══════════════════════════════════════════════════════════════════════════
+-- ═════════════════════════ SCRIPT HUBS ════════════════════
 SecHdr(HubPage,"General Script Hubs",1)
-local hInf=InfoLbl(HubPage,"Works in most Roblox games. Tap Execute to inject.",C.tDim,2); hInf.AutomaticSize=Enum.AutomaticSize.Y
+local hInf=InfoLbl(HubPage,"Works in most Roblox games. Press Execute to inject.",C.tDim,2); hInf.AutomaticSize=Enum.AutomaticSize.Y
 local HGap=Instance.new("Frame"); HGap.BackgroundTransparency=1; HGap.BorderSizePixel=0; HGap.Size=UDim2.new(1,0,0,8); HGap.LayoutOrder=3; HGap.Parent=HubPage
-HubCard(HubPage,"∞","Infinite Yield FE","The most popular FE admin hub with hundreds of commands.",Color3.fromRGB(32,78,190),4,"https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source")
-HubCard(HubPage,"⚡","XVC Hub","Multi-game script hub with many game-specific exploits and tools.",Color3.fromRGB(128,45,205),10,"https://pastebin.com/raw/Piw5bqGq")
+HubCard(HubPage,"∞","Infinite Yield FE","The most popular FE admin script with hundreds of commands and features.",Color3.fromRGB(30,75,188),4,"https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source")
+HubCard(HubPage,"⚡","XVC Hub","XVC multi-game exploit hub — includes tools for many popular games.",Color3.fromRGB(125,42,202),10,"https://pastebin.com/raw/Piw5bqGq")
 
--- ══════════════════════════════════════════════════════════════════════════
---   NDS HUB PAGE
--- ══════════════════════════════════════════════════════════════════════════
+-- ═════════════════════════ NDS HUB ════════════════════
 SecHdr(NDSHubPage,"Natural Disaster Survival Scripts",1)
-local nhInf=InfoLbl(NDSHubPage,"Run these inside Natural Disaster Survival for best results.",C.tDim,2); nhInf.AutomaticSize=Enum.AutomaticSize.Y
+local nhInf=InfoLbl(NDSHubPage,"Scripts made specifically for Natural Disaster Survival.",C.tDim,2); nhInf.AutomaticSize=Enum.AutomaticSize.Y
 local NHGap=Instance.new("Frame"); NHGap.BackgroundTransparency=1; NHGap.BorderSizePixel=0; NHGap.Size=UDim2.new(1,0,0,8); NHGap.LayoutOrder=3; NHGap.Parent=NDSHubPage
-HubCard(NDSHubPage,"💎","Super Ring Parts V6","Latest version of Super Ring Parts for NDS survival.",Color3.fromRGB(36,148,76),4,"https://raw.githubusercontent.com/chesslovers69/Super-ring-parts-v6/refs/heads/main/Bylukaslol")
-HubCard(NDSHubPage,"💠","Super Ring Parts V5","Stable previous version of NDS ring parts.",Color3.fromRGB(34,118,168),10,"https://raw.githubusercontent.com/Lukashub-coder/Super-ring-V5/refs/heads/main/By%20lukas!!")
-HubCard(NDSHubPage,"⚡","XVC Hub","XVC multi-game hub — also provides tools in NDS.",Color3.fromRGB(128,45,205),16,"https://pastebin.com/raw/Piw5bqGq")
+HubCard(NDSHubPage,"💎","Super Ring Parts V6","Latest Super Ring Parts for NDS — top-tier survival rings and anti-disaster tools.",Color3.fromRGB(35,145,75),4,"https://raw.githubusercontent.com/chesslovers69/Super-ring-parts-v6/refs/heads/main/Bylukaslol")
+HubCard(NDSHubPage,"💠","Super Ring Parts V5","Previous stable version — widely used and reliable.",Color3.fromRGB(32,115,165),10,"https://raw.githubusercontent.com/Lukashub-coder/Super-ring-V5/refs/heads/main/By%20lukas!!")
+HubCard(NDSHubPage,"⚡","XVC Hub","XVC multi-game hub — also provides NDS-specific utilities.",Color3.fromRGB(125,42,202),16,"https://pastebin.com/raw/Piw5bqGq")
 
--- ══════════════════════════════════════════════════════════════════════════
---   MISC PAGE
--- ══════════════════════════════════════════════════════════════════════════
+-- ═════════════════════════ MISC PAGE ════════════════════
 SecHdr(MiscPage,"Movement",1)
 TogRow(MiscPage,"👻  Noclip",2,function(s) S.noclip=s end)
 TogRow(MiscPage,"🚀  Flight  (WASD + Space / Ctrl)",3,function(s) S.fly=s end)
 TogRow(MiscPage,"🦘  Infinite Jump",4,function(s) S.infJump=s end)
-SecHdr(MiscPage,"Self Fling",10); TogRow(MiscPage,"🌀  Spin Fling (Infinite Yield style)",11,function(s) S.spin=s end)
+TogRow(MiscPage,"⚓  Anti-Void",5,function(s) S.antiVoid=s end)
+SecHdr(MiscPage,"Self Effects",10)
+TogRow(MiscPage,"🌀  Spin Fling (Infinite Yield style)",11,function(s) S.spin=s end)
 SecHdr(MiscPage,"Appearance",20)
 TogRow(MiscPage,"🫥  Invisible (Local)",21,function(s) S.invis=s; if LP.Character then for _,p in ipairs(LP.Character:GetDescendants()) do if p:IsA("BasePart") or p:IsA("Decal") then p.LocalTransparencyModifier=s and 1 or 0 end end end end)
-ActBtn(MiscPage,"🔄  Respawn Self",Color3.fromRGB(30,76,155),22,function() LP:LoadCharacter() end)
-SecHdr(MiscPage,"Time of Day",30)
-local tRow=Instance.new("Frame"); tRow.BackgroundTransparency=1; tRow.BorderSizePixel=0; tRow.Size=UDim2.new(1,0,0,40); tRow.LayoutOrder=31; tRow.Parent=MiscPage; Pad(tRow,4,4,PD,PD); ListL(tRow,Enum.FillDirection.Horizontal,6)
-for _,d in ipairs({{"☀️ Day",Color3.fromRGB(165,118,20),12},{"🌅 Sunset",Color3.fromRGB(158,72,20),18},{"🌙 Night",Color3.fromRGB(20,20,50),0}}) do
-    local B=Instance.new("TextButton"); B.BackgroundColor3=d[2]; B.BorderSizePixel=0; B.Size=UDim2.new(0.32,0,1,0); B.ZIndex=5; B.Font=Enum.Font.GothamSemibold; B.Text=d[1]; B.TextColor3=C.tPri; B.TextSize=11; B.Parent=tRow; Corn(B,8); B.MouseButton1Click:Connect(function() Lighting.ClockTime=d[3] end)
-end
-
--- ── ACTIVATE DASHBOARD ────────────────────────────────────────────────────
-do
-    local entry=PagesList[1]
-    if entry then
-        entry.page.Visible=true; entry.active=true; entry.bar.Visible=true
-        entry.btn.BackgroundTransparency=0; entry.btn.BackgroundColor3=C.navAct
-        entry.ico.TextColor3=C.navActI
+ActBtn(MiscPage,"🔄  Respawn Self",Color3.fromRGB(28,74,152),22,function() LP:LoadCharacter() end)
+SecHdr(MiscPage,"Gravity",30)
+local gravRow=Instance.new("Frame"); gravRow.BackgroundTransparency=1; gravRow.BorderSizePixel=0; gravRow.Size=UDim2.new(1,0,0,40); gravRow.LayoutOrder=31; gravRow.Parent=MiscPage; Pad(gravRow,4,4,PD,PD); ListL(gravRow,Enum.FillDirection.Horizontal,5)
+for _,gd in ipairs({{"🌙 0g",Color3.fromRGB(22,22,55),0},{"🌍 Normal",Color3.fromRGB(38,38,58),196.2},{"🪨 ×2",Color3.fromRGB(55,35,25),392.4}}) do local B=Instance.new("TextButton"); B.BackgroundColor3=gd[2]; B.BorderSizePixel=0; B.Size=UDim2.new(0.32,0,1,0); B.ZIndex=5; B.Font=Enum.Font.GothamSemibold; B.Text=gd[1]; B.TextColor3=C.tPri; B.TextSize=11; B.Parent=gravRow; Corn(B,8); B.MouseButton1Click:Connect(function() workspace.Gravity=gd[3] end) end
+SecHdr(MiscPage,"Key System",40)
+ActBtn(MiscPage,"🔑  Open Key System / Premium",C.premBg,41,function() OpenKeyUI() end)
+local keyExpLbl=InfoLbl(MiscPage,"Key validity: changes every 48 hours.",C.tDim,42)
+task.spawn(function()
+    while Gui.Parent do task.wait(10)
+        local secondsLeft=(PERIOD_INDEX+1)*PERIOD + EPOCH_ANCHOR - os.time()
+        local hh=math.floor(secondsLeft/3600); local mm=math.floor((secondsLeft%3600)/60)
+        pcall(function() keyExpLbl.Text=string.format("Key validity: %02d:%02d remaining this period",hh,mm) end)
     end
-end
+end)
 
--- ── CLOSE BUTTON wiring ───────────────────────────────────────────────────
-local function ClosePanel() TwnSvc:Create(Win,TweenInfo.new(0.26,Enum.EasingStyle.Back,Enum.EasingDirection.In),{Size=UDim2.new(0,0,0,0)}):Play(); task.wait(0.28); Win.Visible=false; MinBtn.Visible=true end
+-- ── ACTIVATE DEFAULT PAGE ──────────────────────────────────────
+do local e=PagesList[1]; if e then e.page.Visible=true; e.active=true; e.bar.Visible=true; e.btn.BackgroundTransparency=0; e.btn.BackgroundColor3=C.navAct; e.ico.TextColor3=C.navActI end end
+
+-- ── CLOSE BUTTON ───────────────────────────────────────────────
+local function ClosePanel()
+    Tw(Win,0.25,{BackgroundTransparency=1},Enum.EasingStyle.Back,Enum.EasingDirection.In)
+    TwnSvc:Create(Win,TweenInfo.new(0.25,Enum.EasingStyle.Back,Enum.EasingDirection.In),{Size=UDim2.new(0,0,0,0)}):Play()
+    task.wait(0.28); Win.Visible=false; Win.BackgroundTransparency=0; MinBtn.Visible=true
+end
 CloseX.MouseButton1Click:Connect(function() task.spawn(ClosePanel) end)
 
--- ══════════════════════════════════════════════════════════════════════════
---   MOBILE LAYOUT (tab strip, simplified but matching dark aesthetic)
--- ══════════════════════════════════════════════════════════════════════════
-else  -- IS_MOBILE
+-- ═══════════════════════════════════════════════════════════════
+-- MOBILE LAYOUT (simplified but same aesthetic)
+-- ═══════════════════════════════════════════════════════════════
+else
 
 local TopBar=Instance.new("Frame"); TopBar.BackgroundColor3=C.side; TopBar.BorderSizePixel=0; TopBar.Position=UDim2.new(0,0,0,0); TopBar.Size=UDim2.new(1,0,0,TOP_H); TopBar.ZIndex=2; TopBar.Parent=Win
-local TLogo=Instance.new("TextLabel"); TLogo.BackgroundTransparency=1; TLogo.AnchorPoint=Vector2.new(0.5,0.5); TLogo.Position=UDim2.new(0.5,0,0.5,0); TLogo.Size=UDim2.new(0,200,1,0); TLogo.ZIndex=3; TLogo.Font=Enum.Font.GothamBold; TLogo.Text="🌸  Luna Admin"; TLogo.TextColor3=C.tPri; TLogo.TextSize=14; TLogo.Parent=TopBar
-local CloseM=Instance.new("TextButton"); CloseM.BackgroundColor3=Color3.fromRGB(185,48,48); CloseM.BorderSizePixel=0; CloseM.AnchorPoint=Vector2.new(1,0.5); CloseM.Position=UDim2.new(1,-8,0.5,0); CloseM.Size=UDim2.new(0,28,0,28); CloseM.ZIndex=4; CloseM.Font=Enum.Font.GothamBold; CloseM.Text="✕"; CloseM.TextColor3=Color3.new(1,1,1); CloseM.TextSize=13; CloseM.Parent=TopBar; Corn(CloseM,99)
-local TBLine=Instance.new("Frame"); TBLine.BackgroundColor3=C.border; TBLine.BorderSizePixel=0; TBLine.Position=UDim2.new(0,0,0,TOP_H); TBLine.Size=UDim2.new(1,0,0,1); TBLine.ZIndex=3; TBLine.Parent=Win
-
-local TabStrip=Instance.new("ScrollingFrame"); TabStrip.BackgroundColor3=C.side; TabStrip.BorderSizePixel=0; TabStrip.Position=UDim2.new(0,0,0,TOP_H+1); TabStrip.Size=UDim2.new(1,0,0,38); TabStrip.CanvasSize=UDim2.new(0,0,0,0); TabStrip.AutomaticCanvasSize=Enum.AutomaticSize.X; TabStrip.ScrollingDirection=Enum.ScrollingDirection.X; TabStrip.ScrollBarThickness=0; TabStrip.ZIndex=2; TabStrip.Parent=Win; ListL(TabStrip,Enum.FillDirection.Horizontal,0); Pad(TabStrip,4,4,6,6)
+local TLogo=Instance.new("TextLabel"); TLogo.BackgroundTransparency=1; TLogo.AnchorPoint=Vector2.new(0.5,0.5); TLogo.Position=UDim2.new(0.5,0,0.5,0); TLogo.Size=UDim2.new(0,200,1,0); TLogo.ZIndex=3; TLogo.Font=Enum.Font.GothamBold; TLogo.Text="🌸  Luna Admin"; TLogo.TextColor3=C.tPri; TLogo.TextSize=15; TLogo.Parent=TopBar
+local CloseM=Instance.new("TextButton"); CloseM.BackgroundColor3=Color3.fromRGB(185,48,48); CloseM.BorderSizePixel=0; CloseM.AnchorPoint=Vector2.new(1,0.5); CloseM.Position=UDim2.new(1,-8,0.5,0); CloseM.Size=UDim2.new(0,28,0,28); CloseM.ZIndex=4; CloseM.Font=Enum.Font.GothamBold; CloseM.Text="✕"; CloseM.TextColor3=Color3.new(1,1,1); CloseM.TextSize=14; CloseM.Parent=TopBar; Corn(CloseM,99)
+local TBL=Instance.new("Frame"); TBL.BackgroundColor3=C.border; TBL.BorderSizePixel=0; TBL.Position=UDim2.new(0,0,0,TOP_H); TBL.Size=UDim2.new(1,0,0,1); TBL.ZIndex=3; TBL.Parent=Win
+local TabStrip=Instance.new("ScrollingFrame"); TabStrip.BackgroundColor3=C.side; TabStrip.BorderSizePixel=0; TabStrip.Position=UDim2.new(0,0,0,TOP_H+1); TabStrip.Size=UDim2.new(1,0,0,38); TabStrip.CanvasSize=UDim2.new(0,0,0,0); TabStrip.AutomaticCanvasSize=Enum.AutomaticSize.X; TabStrip.ScrollingDirection=Enum.ScrollingDirection.X; TabStrip.ScrollBarThickness=0; TabStrip.ZIndex=2; TabStrip.Parent=Win; ListL(TabStrip,Enum.FillDirection.Horizontal,0); Pad(TabStrip,4,4,5,5)
 local TSSep=Instance.new("Frame"); TSSep.BackgroundColor3=C.border; TSSep.BorderSizePixel=0; TSSep.Position=UDim2.new(0,0,0,TOP_H+39); TSSep.Size=UDim2.new(1,0,0,1); TSSep.ZIndex=3; TSSep.Parent=Win
-local Content=Instance.new("Frame"); Content.BackgroundTransparency=1; Content.BorderSizePixel=0; Content.Position=UDim2.new(0,0,0,TOP_H+42); Content.Size=UDim2.new(1,0,1,-TOP_H-42); Content.ZIndex=2; Content.ClipsDescendants=true; Content.Parent=Win
+local MContent=Instance.new("Frame"); MContent.BackgroundTransparency=1; MContent.BorderSizePixel=0; MContent.Position=UDim2.new(0,0,0,TOP_H+42); MContent.Size=UDim2.new(1,0,1,-TOP_H-42); MContent.ZIndex=2; MContent.ClipsDescendants=true; MContent.Parent=Win
 
 local MobPages={}
-local function MakeTab(name,icon,order)
-    local Btn=Instance.new("TextButton"); Btn.BackgroundTransparency=1; Btn.BorderSizePixel=0; Btn.Size=UDim2.new(0,0,1,0); Btn.AutomaticSize=Enum.AutomaticSize.X; Btn.ZIndex=4; Btn.LayoutOrder=order; Btn.Font=Enum.Font.GothamSemibold; Btn.Text="  "..icon.."  "..name.."  "; Btn.TextColor3=C.tDim; Btn.TextSize=12; Btn.Parent=TabStrip; Corn(Btn,8)
-    local Under=Instance.new("Frame"); Under.BackgroundColor3=C.togOn; Under.BorderSizePixel=0; Under.AnchorPoint=Vector2.new(0,1); Under.Position=UDim2.new(0,4,1,0); Under.Size=UDim2.new(1,-8,0,2); Under.ZIndex=5; Under.Visible=false; Under.Parent=Btn; Corn(Under,99)
-    local Page=Instance.new("ScrollingFrame"); Page.BackgroundTransparency=1; Page.BorderSizePixel=0; Page.Size=UDim2.new(1,0,1,0); Page.CanvasSize=UDim2.new(0,0,0,0); Page.AutomaticCanvasSize=Enum.AutomaticSize.Y; Page.ScrollBarThickness=3; Page.ScrollBarImageColor3=C.togOn; Page.Visible=false; Page.ZIndex=3; Page.Parent=Content; ListL(Page,Enum.FillDirection.Vertical,0)
-    local entry={Btn=Btn,Under=Under,Page=Page}; MobPages[name]=entry
-    Btn.MouseButton1Click:Connect(function() for _,t in pairs(MobPages) do t.Page.Visible=false; t.Under.Visible=false; Tw(t.Btn,0.1,{TextColor3=C.tDim,BackgroundTransparency=1}) end; Page.Visible=true; Under.Visible=true; Tw(Btn,0.1,{TextColor3=C.tPri,BackgroundTransparency=0,BackgroundColor3=C.navAct}) end)
-    return Page
+local function MakeTab(nm,ic,ord)
+    local Btn=Instance.new("TextButton"); Btn.BackgroundTransparency=1; Btn.BorderSizePixel=0; Btn.Size=UDim2.new(0,0,1,0); Btn.AutomaticSize=Enum.AutomaticSize.X; Btn.ZIndex=4; Btn.LayoutOrder=ord; Btn.Font=Enum.Font.GothamSemibold; Btn.Text="  "..ic.."  "..nm.."  "; Btn.TextColor3=C.tDim; Btn.TextSize=12; Btn.Parent=TabStrip; Corn(Btn,8)
+    local Un=Instance.new("Frame"); Un.BackgroundColor3=C.togOn; Un.BorderSizePixel=0; Un.AnchorPoint=Vector2.new(0,1); Un.Position=UDim2.new(0,4,1,0); Un.Size=UDim2.new(1,-8,0,2); Un.ZIndex=5; Un.Visible=false; Un.Parent=Btn; Corn(Un,99)
+    local Pg=Instance.new("ScrollingFrame"); Pg.BackgroundTransparency=1; Pg.BorderSizePixel=0; Pg.Size=UDim2.new(1,0,1,0); Pg.CanvasSize=UDim2.new(0,0,0,0); Pg.AutomaticCanvasSize=Enum.AutomaticSize.Y; Pg.ScrollBarThickness=3; Pg.ScrollBarImageColor3=C.togOn; Pg.Visible=false; Pg.ZIndex=3; Pg.Parent=MContent; ListL(Pg,Enum.FillDirection.Vertical,0)
+    local ent={Btn=Btn,Under=Un,Page=Pg}; MobPages[nm]=ent
+    Btn.MouseButton1Click:Connect(function() for _,t in pairs(MobPages) do t.Page.Visible=false; t.Under.Visible=false; Tw(t.Btn,0.1,{TextColor3=C.tDim,BackgroundTransparency=1}) end; Pg.Visible=true; Un.Visible=true; Tw(Btn,0.1,{TextColor3=C.tPri,BackgroundTransparency=0,BackgroundColor3=C.navAct}) end)
+    return Pg
 end
+
 local MP=8
-local function MS(p,t,o) local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,26); F.LayoutOrder=o; F.Parent=p; Pad(F,0,0,MP,MP); local L=Instance.new("TextLabel"); L.BackgroundTransparency=1; L.Size=UDim2.new(1,0,1,0); L.ZIndex=5; L.Font=Enum.Font.GothamMedium; L.Text=t:upper(); L.TextColor3=C.tDim; L.TextSize=9; L.TextXAlignment=Enum.TextXAlignment.Left; L.Parent=F end
+local function MS(p,t,o) local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,28); F.LayoutOrder=o; F.Parent=p; Pad(F,2,0,MP,MP); local L=Instance.new("TextLabel"); L.BackgroundTransparency=1; L.Size=UDim2.new(1,0,1,0); L.ZIndex=5; L.Font=Enum.Font.GothamBold; L.Text=t:upper(); L.TextColor3=C.tDim; L.TextSize=9; L.TextXAlignment=Enum.TextXAlignment.Left; L.Parent=F end
 local function MT(p,l,o,cb) local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,46); F.LayoutOrder=o; F.Parent=p; Pad(F,0,0,MP,MP); local sep=Instance.new("Frame"); sep.BackgroundColor3=C.sep; sep.BorderSizePixel=0; sep.AnchorPoint=Vector2.new(0,1); sep.Position=UDim2.new(0,0,1,0); sep.Size=UDim2.new(1,0,0,1); sep.ZIndex=4; sep.Parent=F; local Ll=Instance.new("TextLabel"); Ll.BackgroundTransparency=1; Ll.Position=UDim2.new(0,0,0,0); Ll.Size=UDim2.new(1,-58,1,0); Ll.ZIndex=5; Ll.Font=Enum.Font.GothamMedium; Ll.Text=l; Ll.TextColor3=C.tPri; Ll.TextSize=13; Ll.TextXAlignment=Enum.TextXAlignment.Left; Ll.TextWrapped=true; Ll.Parent=F; local Bg=Instance.new("Frame"); Bg.AnchorPoint=Vector2.new(1,0.5); Bg.BackgroundColor3=C.togOff; Bg.BorderSizePixel=0; Bg.Position=UDim2.new(1,0,0.5,0); Bg.Size=UDim2.new(0,50,0,28); Bg.ZIndex=5; Bg.Parent=F; Corn(Bg,99); local Kn=Instance.new("Frame"); Kn.AnchorPoint=Vector2.new(0,0.5); Kn.BackgroundColor3=C.knob; Kn.BorderSizePixel=0; Kn.Position=UDim2.new(0,3,0.5,0); Kn.Size=UDim2.new(0,22,0,22); Kn.ZIndex=6; Kn.Parent=Bg; Corn(Kn,99); local Ca=Instance.new("TextButton"); Ca.BackgroundTransparency=1; Ca.BorderSizePixel=0; Ca.Size=UDim2.new(1,0,1,0); Ca.ZIndex=10; Ca.Text=""; Ca.Font=Enum.Font.Gotham; Ca.TextSize=1; Ca.Parent=F; local on=false; local function Set(s) on=s; if s then Tw(Bg,0.15,{BackgroundColor3=C.togOn}); Tw(Kn,0.15,{Position=UDim2.new(1,-25,0.5,0)}) else Tw(Bg,0.15,{BackgroundColor3=C.togOff}); Tw(Kn,0.15,{Position=UDim2.new(0,3,0.5,0)}) end; if cb then task.spawn(pcall,cb,s) end end; Ca.MouseButton1Click:Connect(function() Set(not on) end); return {Set=Set,Get=function() return on end} end
 local function MA(p,l,c,o,cb) c=c or C.togOn; local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,48); F.LayoutOrder=o; F.Parent=p; Pad(F,5,5,MP,MP); local B=Instance.new("TextButton"); B.BackgroundColor3=c; B.BorderSizePixel=0; B.Size=UDim2.new(1,0,1,0); B.ZIndex=5; B.Font=Enum.Font.GothamSemibold; B.Text=l; B.TextColor3=C.tPri; B.TextSize=14; B.TextWrapped=true; B.Parent=F; Corn(B,10); local lit=c:Lerp(Color3.new(1,1,1),0.14); B.MouseButton1Down:Connect(function() Tw(B,0.05,{BackgroundColor3=lit}) end); B.MouseButton1Up:Connect(function() Tw(B,0.05,{BackgroundColor3=c}) end); if cb then B.MouseButton1Click:Connect(cb) end; return B end
 local function MI(p,ph,o) local F=Instance.new("Frame"); F.BackgroundTransparency=1; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,48); F.LayoutOrder=o; F.Parent=p; Pad(F,5,5,MP,MP); local Box=Instance.new("Frame"); Box.BackgroundColor3=C.cell; Box.BorderSizePixel=0; Box.Size=UDim2.new(1,0,1,0); Box.ZIndex=5; Box.Parent=F; Corn(Box,10); local sk=Strk(Box,C.border,1); local TB=Instance.new("TextBox"); TB.BackgroundTransparency=1; TB.Position=UDim2.new(0,12,0,0); TB.Size=UDim2.new(1,-24,1,0); TB.ZIndex=6; TB.Font=Enum.Font.Gotham; TB.PlaceholderText=ph; TB.PlaceholderColor3=C.tDim; TB.Text=""; TB.TextColor3=C.tPri; TB.TextSize=14; TB.TextXAlignment=Enum.TextXAlignment.Left; TB.ClearTextOnFocus=false; TB.Parent=Box; TB.Focused:Connect(function() Tw(sk,0.12,{Color=C.togOn}) end); TB.FocusLost:Connect(function() Tw(sk,0.12,{Color=C.border}) end); return TB end
-local function MHC(p,icon,title,desc,col,o,url) col=col or C.togOn; local F=Instance.new("Frame"); F.BackgroundColor3=C.card; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,82); F.LayoutOrder=o; F.Parent=p; Corn(F,12); Strk(F,C.border,1); Pad(F,0,0,MP,MP); local IC=Instance.new("Frame"); IC.BackgroundColor3=col; IC.BorderSizePixel=0; IC.AnchorPoint=Vector2.new(0,0.5); IC.Position=UDim2.new(0,0,0.5,0); IC.Size=UDim2.new(0,44,0,44); IC.ZIndex=5; IC.Parent=F; Corn(IC,10); local IL=Instance.new("TextLabel"); IL.BackgroundTransparency=1; IL.Size=UDim2.new(1,0,1,0); IL.ZIndex=6; IL.Font=Enum.Font.GothamBold; IL.Text=icon; IL.TextSize=22; IL.TextColor3=Color3.new(1,1,1); IL.Parent=IC; local TL=Instance.new("TextLabel"); TL.BackgroundTransparency=1; TL.Position=UDim2.new(0,52,0,10); TL.Size=UDim2.new(1,-132,0,20); TL.ZIndex=5; TL.Font=Enum.Font.GothamBold; TL.Text=title; TL.TextColor3=C.tPri; TL.TextSize=13; TL.TextXAlignment=Enum.TextXAlignment.Left; TL.TextTruncate=Enum.TextTruncate.AtEnd; TL.Parent=F; local DL=Instance.new("TextLabel"); DL.BackgroundTransparency=1; DL.Position=UDim2.new(0,52,0,32); DL.Size=UDim2.new(1,-132,0,32); DL.ZIndex=5; DL.Font=Enum.Font.Gotham; DL.Text=desc; DL.TextColor3=C.tSec; DL.TextSize=11; DL.TextXAlignment=Enum.TextXAlignment.Left; DL.TextWrapped=true; DL.Parent=F; local EB=Instance.new("TextButton"); EB.BackgroundColor3=col; EB.BorderSizePixel=0; EB.AnchorPoint=Vector2.new(1,0.5); EB.Position=UDim2.new(1,0,0.5,0); EB.Size=UDim2.new(0,72,0,34); EB.ZIndex=6; EB.Font=Enum.Font.GothamSemibold; EB.Text="▶ Run"; EB.TextColor3=C.tPri; EB.TextSize=12; EB.Parent=F; Corn(EB,8); EB.MouseButton1Click:Connect(function() EB.Text="..."; task.delay(0.6,function() pcall(function() EB.Text="▶ Run" end) end); RunLS(url) end); local Sp=Instance.new("Frame"); Sp.BackgroundTransparency=1; Sp.BorderSizePixel=0; Sp.Size=UDim2.new(1,0,0,8); Sp.LayoutOrder=o+1; Sp.Parent=p end
+local function MHC(p,ic,ti,de,co,o,url) co=co or C.togOn; local F=Instance.new("Frame"); F.BackgroundColor3=C.card; F.BorderSizePixel=0; F.Size=UDim2.new(1,0,0,82); F.LayoutOrder=o; F.Parent=p; Corn(F,12); Strk(F,C.border,1); Pad(F,0,0,MP,MP); local IC=Instance.new("Frame"); IC.BackgroundColor3=co; IC.BorderSizePixel=0; IC.AnchorPoint=Vector2.new(0,0.5); IC.Position=UDim2.new(0,0,0.5,0); IC.Size=UDim2.new(0,44,0,44); IC.ZIndex=5; IC.Parent=F; Corn(IC,10); local IL=Instance.new("TextLabel"); IL.BackgroundTransparency=1; IL.Size=UDim2.new(1,0,1,0); IL.ZIndex=6; IL.Font=Enum.Font.GothamBold; IL.Text=ic; IL.TextSize=22; IL.TextColor3=Color3.new(1,1,1); IL.Parent=IC; local TL=Instance.new("TextLabel"); TL.BackgroundTransparency=1; TL.Position=UDim2.new(0,52,0,10); TL.Size=UDim2.new(1,-130,0,20); TL.ZIndex=5; TL.Font=Enum.Font.GothamBold; TL.Text=ti; TL.TextColor3=C.tPri; TL.TextSize=13; TL.TextXAlignment=Enum.TextXAlignment.Left; TL.TextTruncate=Enum.TextTruncate.AtEnd; TL.Parent=F; local DL=Instance.new("TextLabel"); DL.BackgroundTransparency=1; DL.Position=UDim2.new(0,52,0,32); DL.Size=UDim2.new(1,-130,0,32); DL.ZIndex=5; DL.Font=Enum.Font.Gotham; DL.Text=de; DL.TextColor3=C.tSec; DL.TextSize=11; DL.TextXAlignment=Enum.TextXAlignment.Left; DL.TextWrapped=true; DL.Parent=F; local EB=Instance.new("TextButton"); EB.BackgroundColor3=co; EB.BorderSizePixel=0; EB.AnchorPoint=Vector2.new(1,0.5); EB.Position=UDim2.new(1,0,0.5,0); EB.Size=UDim2.new(0,72,0,34); EB.ZIndex=6; EB.Font=Enum.Font.GothamSemibold; EB.Text="▶ Run"; EB.TextColor3=C.tPri; EB.TextSize=12; EB.Parent=F; Corn(EB,8); EB.MouseButton1Click:Connect(function() EB.Text="..."; task.delay(0.6,function() pcall(function() EB.Text="▶ Run" end) end); RunLS(url) end); local Sp=Instance.new("Frame"); Sp.BackgroundTransparency=1; Sp.BorderSizePixel=0; Sp.Size=UDim2.new(1,0,0,8); Sp.LayoutOrder=o+1; Sp.Parent=p end
 
-local MDash = MakeTab("Home","⊞",1); local MPlay = MakeTab("Players","👥",2); local MVisu = MakeTab("Visuals","👁",3)
-local MNDS  = IS_NDS and MakeTab("NDS","🌋",4) or nil; local MHub = MakeTab("Hubs","📦",IS_NDS and 5 or 4); local MNH = MakeTab("NDS Hub","🌋",IS_NDS and 6 or 5); local MMisc= MakeTab("Misc","⚙",IS_NDS and 7 or 6)
+local MDash=MakeTab("Home","⊞",1); local MPlay=MakeTab("Players","👥",2); local MVisu=MakeTab("Visuals","👁",3)
+local MNDS=IS_NDS and MakeTab("NDS","🌋",4) or nil; local MHub=MakeTab("Hubs","📦",IS_NDS and 5 or 4); local MNH=MakeTab("NDS Hub","🌋",IS_NDS and 6 or 5); local MMisc=MakeTab("Misc","⚙",IS_NDS and 7 or 6)
 
--- Mobile Dashboard
 Pad(MDash,8,8,0,0)
-local MWel=Instance.new("Frame"); MWel.BackgroundColor3=C.welBg; MWel.BorderSizePixel=0; MWel.Size=UDim2.new(1,-16,0,78); MWel.LayoutOrder=1; MWel.Parent=MDash; Corn(MWel,12); Strk(MWel,C.welBdr,1); Pad(MWel,0,0,14,14)
-local MWN=Instance.new("TextLabel"); MWN.BackgroundTransparency=1; MWN.Position=UDim2.new(0,0,0,14); MWN.Size=UDim2.new(0.65,0,0,22); MWN.ZIndex=4; MWN.Font=Enum.Font.GothamBold; MWN.Text="Hello, "..LP.Name.."!"; MWN.TextColor3=C.tPri; MWN.TextSize=15; MWN.TextXAlignment=Enum.TextXAlignment.Left; MWN.TextTruncate=Enum.TextTruncate.AtEnd; MWN.Parent=MWel
-local MWG=Instance.new("TextLabel"); MWG.BackgroundTransparency=1; MWG.Position=UDim2.new(0,0,0,38); MWG.Size=UDim2.new(0.72,0,0,14); MWG.ZIndex=4; MWG.Font=Enum.Font.Gotham; MWG.Text=Greet().."  |  Luna V4 Sirius"; MWG.TextColor3=C.tSec; MWG.TextSize=10; MWG.TextXAlignment=Enum.TextXAlignment.Left; MWG.TextTruncate=Enum.TextTruncate.AtEnd; MWG.Parent=MWel
+local MWel=Instance.new("Frame"); MWel.BackgroundColor3=C.welBg; MWel.BorderSizePixel=0; MWel.Size=UDim2.new(1,-16,0,78); MWel.LayoutOrder=1; MWel.Parent=MDash; Corn(MWel,14); Strk(MWel,C.welBdr,1); Pad(MWel,0,0,14,14)
+local MWN=Instance.new("TextLabel"); MWN.BackgroundTransparency=1; MWN.Position=UDim2.new(0,0,0,14); MWN.Size=UDim2.new(0.62,0,0,22); MWN.ZIndex=4; MWN.Font=Enum.Font.GothamBold; MWN.Text="Hello, "..LP.Name.."!"; MWN.TextColor3=C.tPri; MWN.TextSize=15; MWN.TextXAlignment=Enum.TextXAlignment.Left; MWN.TextTruncate=Enum.TextTruncate.AtEnd; MWN.Parent=MWel
+local MWG=Instance.new("TextLabel"); MWG.BackgroundTransparency=1; MWG.Position=UDim2.new(0,0,0,38); MWG.Size=UDim2.new(0.75,0,0,14); MWG.ZIndex=4; MWG.Font=Enum.Font.Gotham; MWG.Text=Greet().."  ·  Luna Admin V5 Aurora"; MWG.TextColor3=C.tSec; MWG.TextSize=10; MWG.TextXAlignment=Enum.TextXAlignment.Left; MWG.TextTruncate=Enum.TextTruncate.AtEnd; MWG.Parent=MWel
 local MWT=Instance.new("TextLabel"); MWT.BackgroundTransparency=1; MWT.AnchorPoint=Vector2.new(1,0); MWT.Position=UDim2.new(1,-4,0,14); MWT.Size=UDim2.new(0,90,0,16); MWT.ZIndex=4; MWT.Font=Enum.Font.GothamBold; MWT.Text=os.date("%H:%M:%S"); MWT.TextColor3=C.tPri; MWT.TextSize=12; MWT.TextXAlignment=Enum.TextXAlignment.Right; MWT.Parent=MWel
 task.spawn(function() while Gui.Parent do task.wait(1); pcall(function() MWT.Text=os.date("%H:%M:%S") end) end end)
 
--- Mobile Codex card
-local MCod=Instance.new("Frame"); MCod.BackgroundColor3=codexBg; MCod.BorderSizePixel=0; MCod.Size=UDim2.new(1,-16,0,72); MCod.LayoutOrder=2; MCod.Parent=MDash; Corn(MCod,12); Strk(MCod,codexAcct:Lerp(Color3.new(0,0,0),0.5),1); Pad(MCod,12,12,14,14)
-local MCT=Instance.new("TextLabel"); MCT.BackgroundTransparency=1; MCT.Size=UDim2.new(0.55,0,0,16); MCT.ZIndex=5; MCT.Font=Enum.Font.GothamBold; MCT.Text="Codex  ·  "..EXEC_NAME; MCT.TextColor3=codexAcct; MCT.TextSize=13; MCT.TextXAlignment=Enum.TextXAlignment.Left; MCT.Parent=MCod
-local MCS=Instance.new("TextLabel"); MCS.BackgroundTransparency=1; MCS.Position=UDim2.new(0,0,0,20); MCS.Size=UDim2.new(1,0,1,-20); MCS.ZIndex=5; MCS.Font=Enum.Font.Gotham; MCS.Text=codexMsg; MCS.TextColor3=codexAcct:Lerp(Color3.new(1,1,1),0.4); MCS.TextSize=11; MCS.TextXAlignment=Enum.TextXAlignment.Left; MCS.TextWrapped=true; MCS.Parent=MCod
+local MCod=Instance.new("Frame"); MCod.BackgroundColor3=codBg; MCod.BorderSizePixel=0; MCod.Size=UDim2.new(1,-16,0,72); MCod.LayoutOrder=2; MCod.Parent=MDash; Corn(MCod,12); Strk(MCod,codAcc:Lerp(Color3.new(0,0,0),0.5),1); Pad(MCod,12,12,14,14)
+local MCT=Instance.new("TextLabel"); MCT.BackgroundTransparency=1; MCT.Size=UDim2.new(1,0,0,16); MCT.ZIndex=5; MCT.Font=Enum.Font.GothamBold; MCT.Text="Codex  ·  "..EXEC_NAME; MCT.TextColor3=codAcc; MCT.TextSize=13; MCT.TextXAlignment=Enum.TextXAlignment.Left; MCT.Parent=MCod
+local MCS=Instance.new("TextLabel"); MCS.BackgroundTransparency=1; MCS.Position=UDim2.new(0,0,0,20); MCS.Size=UDim2.new(1,0,1,-20); MCS.ZIndex=5; MCS.Font=Enum.Font.Gotham; MCS.Text=codMsg; MCS.TextColor3=codAcc:Lerp(Color3.new(1,1,1),0.4); MCS.TextSize=10; MCS.TextXAlignment=Enum.TextXAlignment.Left; MCS.TextWrapped=true; MCS.Parent=MCod
 
-local MDisc=Instance.new("TextButton"); MDisc.BackgroundColor3=C.discBg; MDisc.BorderSizePixel=0; MDisc.Size=UDim2.new(1,-16,0,44); MDisc.LayoutOrder=3; MDisc.Font=Enum.Font.GothamSemibold; MDisc.Text="🎮  Tap to copy Discord link"; MDisc.TextColor3=Color3.new(1,1,1); MDisc.TextSize=13; MDisc.Parent=MDash; Corn(MDisc,10)
-MDisc.MouseButton1Click:Connect(function() CopyClip("https://discord.gg/JGeVGv23TQ"); MDisc.Text="✓  Copied!"; task.delay(1.5,function() MDisc.Text="🎮  Tap to copy Discord link" end) end)
+local MDisc=Instance.new("TextButton"); MDisc.BackgroundColor3=C.discBg; MDisc.BorderSizePixel=0; MDisc.Size=UDim2.new(1,-16,0,44); MDisc.LayoutOrder=3; MDisc.Font=Enum.Font.GothamSemibold; MDisc.Text="🎮  Tap to copy Discord link"; MDisc.TextColor3=Color3.new(1,1,1); MDisc.TextSize=13; MDisc.Parent=MDash; Corn(MDisc,10); MDisc.MouseButton1Click:Connect(function() CopyClip("https://discord.gg/JGeVGv23TQ"); MDisc.Text="✓  Copied!"; task.delay(1.5,function() MDisc.Text="🎮  Tap to copy Discord link" end) end)
+
+-- Premium unlock button on mobile
+local MPremBtn=Instance.new("TextButton"); MPremBtn.BackgroundColor3=C.premBg; MPremBtn.BorderSizePixel=0; MPremBtn.Size=UDim2.new(1,-16,0,44); MPremBtn.LayoutOrder=4; MPremBtn.ZIndex=5; MPremBtn.Font=Enum.Font.GothamBold; MPremBtn.Text="✦  Unlock Luna Admin.Premium"; MPremBtn.TextColor3=C.gold; MPremBtn.TextSize=13; MPremBtn.Parent=MDash; Corn(MPremBtn,10); Strk(MPremBtn,C.premBdr,1.5); MPremBtn.MouseButton1Click:Connect(function() if PREMIUM_UNLOCKED then MPremBtn.Text="✅ Premium Active"; MPremBtn.TextColor3=C.ok else OpenKeyUI() end end)
 
 MS(MPlay,"God Mode",1); MT(MPlay,"God Mode",2,function(s) S.god=s; if s then local h=GetHum(LP); if h then h.MaxHealth=math.huge; h.Health=math.huge end end end)
-MS(MPlay,"Fling",10); local mfI=MI(MPlay,"Player name...",11); MA(MPlay,"🌀 Fling Selected",Color3.fromRGB(185,78,25),12,function() local t=FindP(mfI.Text); if not t then return end; task.spawn(FlingOne,t) end); MA(MPlay,"💥 Fling ALL",Color3.fromRGB(165,38,38),13,function() task.spawn(FlingAll) end)
-MS(MVisu,"ESP",1); MT(MVisu,"ESP Boxes + Names",2,function(s) S.esp=s; if s then for _,p in ipairs(Players:GetPlayers()) do InitESP(p) end end end); MT(MVisu,"Show HP",3,function(s) S.showHP=s end); MT(MVisu,"Tracers",4,function(s) S.tracer=s; if s then for _,p in ipairs(Players:GetPlayers()) do InitESP(p) end end end)
-MS(MVisu,"Environment",10); MT(MVisu,"Fullbright",11,function(s) S.fullbrite=s; Lighting.Brightness=s and 6 or 1; if s then Lighting.ClockTime=14 end end)
-if IS_NDS and MNDS then MS(MNDS,"Disaster",1); local mdL=Instance.new("TextLabel"); mdL.BackgroundTransparency=1; mdL.Size=UDim2.new(1,0,0,22); mdL.LayoutOrder=2; mdL.Font=Enum.Font.GothamSemibold; mdL.Text="Detecting..."; mdL.TextColor3=C.warn; mdL.TextSize=13; mdL.TextXAlignment=Enum.TextXAlignment.Left; mdL.Parent=MNDS; Pad(mdL,0,0,8,8); task.spawn(function() while Gui.Parent do task.wait(1.5); pcall(function() local d=GetDisaster(); mdL.Text="Disaster: "..d; mdL.TextColor3=d=="None / Waiting" and C.tDim or C.warn end) end end); MS(MNDS,"Auto Survive",10); MT(MNDS,"Auto Safe (above Y=320)",11,function(s) S.ndsAuto=s end); MA(MNDS,"☁️ Sky Teleport",Color3.fromRGB(52,104,195),20,function() local r=GetRoot(LP); if r then pcall(function() r.CFrame=CFrame.new(r.Position.X,320,r.Position.Z) end) end end); MA(MNDS,"🌟 Survival Pack",Color3.fromRGB(148,118,15),21,function() S.god=true; S.noclip=true; S.fly=true; S.ndsAuto=true; local h=GetHum(LP); if h then h.MaxHealth=math.huge; h.Health=math.huge end end) end
-MS(MHub,"Hubs",1); MHC(MHub,"∞","Infinite Yield FE","Popular FE admin hub",Color3.fromRGB(32,78,190),2,"https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"); MHC(MHub,"⚡","XVC Hub","Multi-game script hub",Color3.fromRGB(128,45,205),4,"https://pastebin.com/raw/Piw5bqGq")
-MS(MNH,"NDS Hub",1); MHC(MNH,"💎","Super Ring Parts V6","Latest NDS ring parts",Color3.fromRGB(36,148,76),2,"https://raw.githubusercontent.com/chesslovers69/Super-ring-parts-v6/refs/heads/main/Bylukaslol"); MHC(MNH,"💠","Super Ring Parts V5","Previous NDS ring parts",Color3.fromRGB(34,118,168),4,"https://raw.githubusercontent.com/Lukashub-coder/Super-ring-V5/refs/heads/main/By%20lukas!!"); MHC(MNH,"⚡","XVC Hub","Works in NDS too",Color3.fromRGB(128,45,205),6,"https://pastebin.com/raw/Piw5bqGq")
-MS(MMisc,"Movement",1); MT(MMisc,"👻 Noclip",2,function(s) S.noclip=s end); MT(MMisc,"🚀 Flight",3,function(s) S.fly=s end); MT(MMisc,"🦘 Infinite Jump",4,function(s) S.infJump=s end)
-MS(MMisc,"Fling",10); MT(MMisc,"🌀 Spin Fling",11,function(s) S.spin=s end)
-MS(MMisc,"Appearance",20); MT(MMisc,"🫥 Invisible",21,function(s) S.invis=s; if LP.Character then for _,p in ipairs(LP.Character:GetDescendants()) do if p:IsA("BasePart") or p:IsA("Decal") then p.LocalTransparencyModifier=s and 1 or 0 end end end end); MA(MMisc,"🔄 Respawn",Color3.fromRGB(30,76,155),22,function() LP:LoadCharacter() end)
+MS(MPlay,"Fling",10); local mfI=MI(MPlay,"Player name...",11); MA(MPlay,"🌀 Fling Selected",Color3.fromRGB(185,78,25),12,function() local t=FindP(mfI.Text); if not t then return end; task.spawn(FlingOne,t) end); MA(MPlay,"💥 Fling ALL",Color3.fromRGB(162,38,38),13,function() task.spawn(FlingAll) end)
+MS(MVisu,"ESP",1); MT(MVisu,"ESP Boxes + Names",2,function(s) S.esp=s; if s then for _,p in ipairs(Players:GetPlayers()) do InitESP(p) end end end); MT(MVisu,"Show HP",3,function(s) S.showHP=s end); MT(MVisu,"Tracers",4,function(s) S.tracer=s; if s then for _,p in ipairs(Players:GetPlayers()) do InitESP(p) end end end); MS(MVisu,"Environment",10); MT(MVisu,"Fullbright",11,function(s) S.fullbrite=s; Lighting.Brightness=s and 6 or 1; if s then Lighting.ClockTime=14 end end)
+if IS_NDS and MNDS then MS(MNDS,"Disaster",1); local mdL=Instance.new("TextLabel"); mdL.BackgroundTransparency=1; mdL.Size=UDim2.new(1,0,0,22); mdL.LayoutOrder=2; mdL.Font=Enum.Font.GothamBold; mdL.Text="Detecting..."; mdL.TextColor3=C.warn; mdL.TextSize=13; mdL.TextXAlignment=Enum.TextXAlignment.Left; mdL.Parent=MNDS; Pad(mdL,0,0,8,8); task.spawn(function() while Gui.Parent do task.wait(1.5); pcall(function() local d=GetDisaster(); mdL.Text=d; mdL.TextColor3=d:find("None") and C.tDim or C.warn end) end end); MS(MNDS,"Auto Survive",10); MT(MNDS,"Auto Safe (above Y=320)",11,function(s) S.ndsAuto=s end); MA(MNDS,"☁️ Sky Teleport",Color3.fromRGB(50,100,195),20,function() local r=GetRoot(LP); if r then pcall(function() r.CFrame=CFrame.new(r.Position.X,350,r.Position.Z) end) end end); MA(MNDS,"🌟 Survival Pack",Color3.fromRGB(145,115,15),21,function() S.god=true; S.noclip=true; S.fly=true; S.ndsAuto=true; local h=GetHum(LP); if h then h.MaxHealth=math.huge; h.Health=math.huge end end) end
+MS(MHub,"Hubs",1); MHC(MHub,"∞","Infinite Yield FE","Popular FE admin hub",Color3.fromRGB(30,75,188),2,"https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"); MHC(MHub,"⚡","XVC Hub","Multi-game script hub",Color3.fromRGB(125,42,202),4,"https://pastebin.com/raw/Piw5bqGq")
+MS(MNH,"NDS Hub",1); MHC(MNH,"💎","Super Ring Parts V6","Latest NDS ring parts",Color3.fromRGB(35,145,75),2,"https://raw.githubusercontent.com/chesslovers69/Super-ring-parts-v6/refs/heads/main/Bylukaslol"); MHC(MNH,"💠","Super Ring Parts V5","Previous NDS ring parts",Color3.fromRGB(32,115,165),4,"https://raw.githubusercontent.com/Lukashub-coder/Super-ring-V5/refs/heads/main/By%20lukas!!"); MHC(MNH,"⚡","XVC Hub","Works in NDS too",Color3.fromRGB(125,42,202),6,"https://pastebin.com/raw/Piw5bqGq")
+MS(MMisc,"Movement",1); MT(MMisc,"👻 Noclip",2,function(s) S.noclip=s end); MT(MMisc,"🚀 Flight",3,function(s) S.fly=s end); MT(MMisc,"🦘 Infinite Jump",4,function(s) S.infJump=s end); MS(MMisc,"Premium",10); MA(MMisc,"🔑 Open Key System",C.premBg,11,function() OpenKeyUI() end)
 
--- Activate first mobile tab
-MobPages["Home"].Page.Visible=true; MobPages["Home"].Under.Visible=true
-MobPages["Home"].Btn.BackgroundTransparency=0; MobPages["Home"].Btn.BackgroundColor3=C.navAct; MobPages["Home"].Btn.TextColor3=C.tPri
-
-local function ClosePanel() TwnSvc:Create(Win,TweenInfo.new(0.26,Enum.EasingStyle.Back,Enum.EasingDirection.In),{Size=UDim2.new(0,0,0,0)}):Play(); task.wait(0.28); Win.Visible=false end
-CloseM.MouseButton1Click:Connect(function() task.spawn(ClosePanel) end)
+MobPages["Home"].Page.Visible=true; MobPages["Home"].Under.Visible=true; MobPages["Home"].Btn.BackgroundTransparency=0; MobPages["Home"].Btn.BackgroundColor3=C.navAct; MobPages["Home"].Btn.TextColor3=C.tPri
+local function CloseMob() Tw(Win,0.25,{},Enum.EasingStyle.Back,Enum.EasingDirection.In); TwnSvc:Create(Win,TweenInfo.new(0.25,Enum.EasingStyle.Back,Enum.EasingDirection.In),{Size=UDim2.new(0,0,0,0)}):Play(); task.wait(0.28); Win.Visible=false; MinBtn.Visible=true end
+CloseM.MouseButton1Click:Connect(function() task.spawn(CloseMob) end)
 
 end -- end IS_MOBILE
 
--- ══════════════════════════════════════════════════════════════════════════
---   MINIMIZE CIRCLE  (both platforms)
--- ══════════════════════════════════════════════════════════════════════════
-MinBtn = Instance.new("TextButton"); MinBtn.Name="MinBtn"; MinBtn.AnchorPoint=Vector2.new(0,1); MinBtn.BackgroundColor3=Color3.fromRGB(22,22,30); MinBtn.BorderSizePixel=0; MinBtn.Position=UDim2.new(0,14,1,-14); MinBtn.Size=UDim2.new(0,52,0,52); MinBtn.ZIndex=60; MinBtn.Font=Enum.Font.GothamBold; MinBtn.Text="🌸"; MinBtn.TextSize=22; MinBtn.Visible=false; MinBtn.Parent=Gui; Corn(MinBtn,999); local msk=Strk(MinBtn,C.navActI,2)
+-- ═════════════════════════ MINIMIZE CIRCLE ════════════════════════
+MinBtn=Instance.new("TextButton"); MinBtn.Name="MinBtn"; MinBtn.AnchorPoint=Vector2.new(0,1); MinBtn.BackgroundColor3=Color3.fromRGB(18,18,28); MinBtn.BorderSizePixel=0; MinBtn.Position=UDim2.new(0,14,1,-14); MinBtn.Size=UDim2.new(0,52,0,52); MinBtn.ZIndex=60; MinBtn.Font=Enum.Font.GothamBold; MinBtn.Text="🌸"; MinBtn.TextSize=22; MinBtn.Visible=false; MinBtn.Parent=Gui; Corn(MinBtn,999); local msk=Strk(MinBtn,C.navActI,2)
 local MinTip=Instance.new("TextLabel"); MinTip.BackgroundColor3=C.card; MinTip.BorderSizePixel=0; MinTip.AnchorPoint=Vector2.new(0,0.5); MinTip.Size=UDim2.new(0,96,0,24); MinTip.ZIndex=61; MinTip.Font=Enum.Font.GothamSemibold; MinTip.Text="Open Luna"; MinTip.TextColor3=C.tPri; MinTip.TextSize=11; MinTip.Visible=false; MinTip.Parent=Gui; Corn(MinTip,6); Strk(MinTip,C.border,1)
 MinBtn.MouseEnter:Connect(function() if MinBtn.Visible then MinTip.Position=UDim2.new(0,MinBtn.Position.X.Offset+58,0,MinBtn.Position.Y.Offset-26); MinTip.Visible=true end end)
 MinBtn.MouseLeave:Connect(function() MinTip.Visible=false end)
-task.spawn(function() while Gui.Parent do task.wait(0.3); if MinBtn.Visible then TwnSvc:Create(msk,TweenInfo.new(0.95,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true),{Transparency=0.7}):Play(); break end end end)
+task.spawn(function() while Gui.Parent do task.wait(0.3); if MinBtn.Visible then TwnSvc:Create(msk,TweenInfo.new(0.95,Enum.EasingStyle.Sine,Enum.EasingDirection.InOut,-1,true),{Transparency=0.72}):Play(); break end end end)
 
-local function OpenPanel() MinBtn.Visible=false; MinTip.Visible=false; Win.Visible=true; Win.Size=UDim2.new(0,0,0,0); TwnSvc:Create(Win,TweenInfo.new(0.46,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Size=UDim2.new(0,WIN_W,0,WIN_H)}):Play() end
+local function OpenPanel() MinBtn.Visible=false; MinTip.Visible=false; Win.Visible=true; Win.Size=UDim2.new(0,0,0,0); TwB(Win,0.48,{Size=UDim2.new(0,WIN_W,0,WIN_H)}) end
 
--- Close connections already made per-platform above
--- MinBtn tap to open
-local mDrag2,mDragged2,mStart2,mBtnStart2=false,false,nil,nil
-MinBtn.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then mDrag2=true; mDragged2=false; mStart2=i.Position; mBtnStart2=MinBtn.Position end end)
-UIS.InputChanged:Connect(function(i) if (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) and mDrag2 then local d=i.Position-mStart2; if d.Magnitude>8 then mDragged2=true; MinTip.Visible=false; MinBtn.Position=UDim2.new(mBtnStart2.X.Scale,mBtnStart2.X.Offset+d.X,mBtnStart2.Y.Scale,mBtnStart2.Y.Offset+d.Y) end end end)
-UIS.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then if mDrag2 and not mDragged2 and MinBtn.Visible then OpenPanel() end; mDrag2=false end end)
+local mDrag,mDragged,mStart,mBtnStart=false,false,nil,nil
+MinBtn.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then mDrag=true; mDragged=false; mStart=i.Position; mBtnStart=MinBtn.Position end end)
+UIS.InputChanged:Connect(function(i) if (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) and mDrag then local d=i.Position-mStart; if d.Magnitude>8 then mDragged=true; MinTip.Visible=false; MinBtn.Position=UDim2.new(mBtnStart.X.Scale,mBtnStart.X.Offset+d.X,mBtnStart.Y.Scale,mBtnStart.Y.Offset+d.Y) end end end)
+UIS.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then if mDrag and not mDragged and MinBtn.Visible then OpenPanel() end; mDrag=false end end)
 
--- PC ClosePanel wires MinBtn
-if not IS_MOBILE then
-    -- find CloseX (already wired via ClosePanel above in PC block)
-    -- Wire MinBtn.Visible via CloseX
-    local function ClosePC() TwnSvc:Create(Win,TweenInfo.new(0.26,Enum.EasingStyle.Back,Enum.EasingDirection.In),{Size=UDim2.new(0,0,0,0)}):Play(); task.wait(0.28); Win.Visible=false; MinBtn.Visible=true end
-    -- Re-wire CloseX properly (it was defined in PC block scope)
-    -- We use a workaround: find it by iterating TopBar children
+-- ═════════════════════════ LOADING TRANSITION ══════════════════
+-- Uses task.delay (fires even if earlier code errored in a task.spawn)
+-- The loading bar tween takes 2.4s; we wait 2.8s then fade out.
+local function DoLoadTransition()
     pcall(function()
-        for _,tb in ipairs(Win:GetChildren()) do
-            if tb.BackgroundColor3==C.topbar then
-                for _,ch in ipairs(tb:GetChildren()) do
-                    if ch:IsA("TextButton") and ch.Text=="✕" then
-                        ch.MouseButton1Click:Connect(function() task.spawn(ClosePC) end)
-                    end
-                end
-            end
-        end
+        Tw(LCard,0.30,{BackgroundTransparency=1},Enum.EasingStyle.Quad,Enum.EasingDirection.In)
+        TwnSvc:Create(LCard,TweenInfo.new(0.30,Enum.EasingStyle.Quad,Enum.EasingDirection.In),
+            {Size=UDim2.new(0,260,0,0)}):Play()
+    end)
+    task.wait(0.1)
+    pcall(function() Tw(LBG,0.40,{BackgroundTransparency=1}) end)
+    task.wait(0.45)
+    pcall(function() LoadGui:Destroy() end)
+    pcall(function()
+        Gui.Enabled = true
+        Win.Visible = true
+        Win.Size    = UDim2.new(0,0,0,0)
+        TwB(Win,0.50,{Size=UDim2.new(0,WIN_W,0,WIN_H)})
     end)
 end
 
--- ══════════════════════════════════════════════════════════════════════════
---   LOADING TRANSITION
--- ══════════════════════════════════════════════════════════════════════════
+-- Fire premium callbacks immediately (everyone is unlocked)
 task.spawn(function()
-    task.wait(2.6)
-    TwnSvc:Create(LCard,TweenInfo.new(0.32,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{BackgroundTransparency=1,Size=UDim2.new(0,240,0,0)}):Play()
-    TwnSvc:Create(LBG,TweenInfo.new(0.42,Enum.EasingStyle.Quad,Enum.EasingDirection.In),{BackgroundTransparency=1}):Play()
-    task.wait(0.46); pcall(function() LoadGui:Destroy() end)
-    Gui.Enabled=true; Win.Visible=true; Win.Size=UDim2.new(0,0,0,0)
-    TwnSvc:Create(Win,TweenInfo.new(0.52,Enum.EasingStyle.Back,Enum.EasingDirection.Out),{Size=UDim2.new(0,WIN_W,0,WIN_H)}):Play()
+    task.wait(3.2)  -- after UI is built and shown
+    for _, cb in ipairs(PREMIUM_FEATURES) do pcall(cb) end
 end)
 
-print("[LunaAdmin V4 ] ✅  "..(IS_MOBILE and "📱 Mobile" or "💻 PC").."  ·  "..EXEC_NAME.."  ·  "..LP.Name)
+task.delay(2.8, function() DoLoadTransition() end)
+
+print(string.format("[LunaAdmin V5 Aurora] ✅  %s  ·  %s  ·  %s  ·  Key Period: %d",
+    IS_MOBILE and "📱 Mobile" or "💻 PC", EXEC_NAME, LP.Name, PERIOD_INDEX))
