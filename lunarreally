@@ -1395,6 +1395,69 @@ task.spawn(function()
         local B=Instance.new("TextButton"); B.BackgroundColor3=gd[2]; B.BorderSizePixel=0; B.Size=UDim2.new(0.32,0,1,0); B.ZIndex=5; B.Font=Enum.Font.GothamSemibold; B.Text=gd[1]; B.TextColor3=C.tPri; B.TextSize=11; B.Parent=gRow; corner(B,8); B.MouseButton1Click:Connect(function() workspace.Gravity=gd[3] end)
     end
 
+    -- ════════════════════════════
+    -- GUI SIZE  (1 = smallest, 5 = largest)
+    -- ════════════════════════════
+    mkHdr(MiscPage,"Gui Size",40)
+
+    -- Info label showing current size
+    local GSInfo = Instance.new("Frame"); GSInfo.BackgroundTransparency=1; GSInfo.BorderSizePixel=0; GSInfo.Size=UDim2.new(1,0,0,22); GSInfo.LayoutOrder=41; GSInfo.Parent=MiscPage; pad(GSInfo,0,0,PD,PD)
+    local GSLbl = Instance.new("TextLabel"); GSLbl.BackgroundTransparency=1; GSLbl.Size=UDim2.new(1,0,1,0); GSLbl.ZIndex=5; GSLbl.Font=Enum.Font.Gotham; GSLbl.Text="Current size: 3  (default)"; GSLbl.TextColor3=C.tSec; GSLbl.TextSize=11; GSLbl.TextXAlignment=Enum.TextXAlignment.Left; GSLbl.Parent=GSInfo
+
+    -- Size buttons 1–5
+    local GSRow = Instance.new("Frame"); GSRow.BackgroundTransparency=1; GSRow.BorderSizePixel=0; GSRow.Size=UDim2.new(1,0,0,40); GSRow.LayoutOrder=42; GSRow.Parent=MiscPage; pad(GSRow,4,4,PD,PD); listl(GSRow,Enum.FillDirection.Horizontal,5)
+
+    local GUI_SIZES = {
+        [1] = UDim2.new(0, 480, 0, 320),
+        [2] = UDim2.new(0, 590, 0, 395),
+        [3] = UDim2.new(0, 740, 0, 495),   -- default
+        [4] = UDim2.new(0, 880, 0, 585),
+        [5] = UDim2.new(0, 1020, 0, 680),
+    }
+    local curSize = 3
+    local sizeButtons = {}
+
+    local function applySize(n)
+        curSize = n
+        GSLbl.Text = "Current size: "..n..(n==1 and "  (smallest)" or n==5 and "  (largest)" or n==3 and "  (default)" or "")
+        -- Tween the window to new size, keeping it centered
+        TwnSvc:Create(Win, TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size=GUI_SIZES[n]}):Play()
+        -- Highlight active button
+        for idx, btn in ipairs(sizeButtons) do
+            if idx == n then
+                tw(btn, 0.12, {BackgroundColor3=C.togOn})
+                btn.TextColor3 = Color3.new(1,1,1)
+            else
+                tw(btn, 0.12, {BackgroundColor3=C.cell})
+                btn.TextColor3 = C.tSec
+            end
+        end
+    end
+
+    for i = 1, 5 do
+        local SzBtn = Instance.new("TextButton")
+        SzBtn.BackgroundColor3 = i == 3 and C.togOn or C.cell
+        SzBtn.BackgroundTransparency = 0.08
+        SzBtn.BorderSizePixel = 0
+        SzBtn.Size = UDim2.new(0.18, 0, 1, 0)
+        SzBtn.ZIndex = 5
+        SzBtn.Font = Enum.Font.GothamBold
+        SzBtn.Text = tostring(i)
+        SzBtn.TextColor3 = i == 3 and Color3.new(1,1,1) or C.tSec
+        SzBtn.TextSize = 13
+        SzBtn.Parent = GSRow
+        corner(SzBtn, 8)
+        table.insert(sizeButtons, SzBtn)
+        local idx = i
+        SzBtn.MouseButton1Click:Connect(function() applySize(idx) end)
+        SzBtn.MouseEnter:Connect(function()
+            if idx ~= curSize then tw(SzBtn,0.1,{BackgroundColor3=C.navAct}) end
+        end)
+        SzBtn.MouseLeave:Connect(function()
+            if idx ~= curSize then tw(SzBtn,0.1,{BackgroundColor3=C.cell}) end
+        end)
+    end
+
     -- ── Activate Dashboard ──
     DashE.activate()
 
